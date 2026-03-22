@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>IA Assistant</title>
+  <link rel="stylesheet" href="shared.css">
+  <link rel="stylesheet" href="panel.css">
+</head>
+<body>
+
+  <div class="ia-panel-banner">
+    Ventana separada — no visible al compartir pestaña/ventana de Meet
+  </div>
+
+  <div class="ia-panel-header">
+    <div class="ia-panel-header-left">
+      <span class="ia-panel-title">Interview Assistant AI</span>
+    </div>
+    <div class="ia-panel-header-buttons">
+      <span class="ia-status-dot" id="ia-panel-status-dot" title="Estado"></span>
+      <button id="ia-panel-font-btn" title="Tamaño de letra">A</button>
+      <button id="ia-panel-dock-btn" title="Volver al overlay en Meet">←</button>
+    </div>
+  </div>
+
+  <div class="ia-panel-body">
+    <div class="ia-panel-disconnected" id="ia-panel-disconnected">
+      Reconectando con la pestaña de Meet...
+    </div>
+
+    <div class="ia-panel-transcript-section" id="ia-panel-transcript-section">
+      <div class="ia-section-label ia-transcript-label-row">
+        <span>Transcripción</span>
+        <div class="ia-transcript-label-actions">
+          <button type="button" id="ia-panel-collapse-btn" class="ia-transcript-collapse-btn"
+            title="Ocultar transcripción">▾</button>
+          <button type="button" id="ia-panel-follow-btn" class="ia-transcript-follow-btn active"
+            title="Auto-scroll activo">↓ Auto</button>
+        </div>
+      </div>
+      <div class="ia-panel-transcript-inner">
+        <div class="ia-panel-transcript" id="ia-panel-transcript"></div>
+      </div>
+    </div>
+
+    <div class="ia-panel-divider"></div>
+
+    <div class="ia-panel-suggestion-section">
+      <div class="ia-section-label ia-section-label--primary">
+        Sugerencia
+        <div class="ia-panel-suggestion-actions">
+          <button type="button" id="ia-panel-send-btn" title="Enviar contexto actual a la IA">Enviar</button>
+          <button type="button" id="ia-panel-copy-btn" title="Copiar sugerencia">Copiar</button>
+          <button type="button" id="ia-panel-refresh-btn" title="Regenerar sugerencia">↻</button>
+        </div>
+      </div>
+      <div class="ia-panel-suggestion" id="ia-panel-suggestion">
+        <span class="ia-placeholder">Esperando conexión con Meet...</span>
+      </div>
+      <div class="ia-panel-loading" id="ia-panel-loading" style="display:none">
+        <div class="ia-spinner"></div>
+        <span>Generando respuesta...</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="ia-panel-controls" id="ia-panel-controls">
+    <div class="ia-panel-mode-row">
+      <span class="ia-control-label">Modo:</span>
+      <div class="ia-panel-mode-toggle">
+        <button id="ia-panel-mode-auto" class="ia-mode-btn active" title="Automático tras silencio">Auto</button>
+        <button id="ia-panel-mode-manual" class="ia-mode-btn" title="Tú decides cuándo pedir sugerencia">Manual</button>
+      </div>
+    </div>
+    <div class="ia-panel-debounce-row" id="ia-panel-debounce-row">
+      <span class="ia-control-label">Espera: <span class="ia-panel-debounce-val" id="ia-panel-debounce-val">1.8s</span></span>
+      <input type="range" class="ia-panel-debounce-slider" id="ia-panel-debounce-slider" min="500" max="5000" step="100" value="1800">
+    </div>
+  </div>
+
+  <div class="ia-panel-note-section" id="ia-panel-note-section">
+    <label class="ia-note-label" for="ia-panel-user-note">Nota para la IA</label>
+    <textarea class="ia-panel-note-input" id="ia-panel-user-note" rows="2" maxlength="1200"
+      placeholder="Instrucciones puntuales para esta parte de la entrevista."
+      spellcheck="true"></textarea>
+  </div>
+
+  <div class="ia-panel-footer">
+    <span class="ia-panel-status-text" id="ia-panel-status-text">Conectando...</span>
+    <div class="ia-panel-footer-actions">
+      <button type="button" id="ia-panel-download-log" title="Exportar registro (.txt)">Exportar</button>
+      <button id="ia-panel-activate-btn">Activar</button>
+    </div>
+  </div>
+
+  <script src="utils.js"></script>
+  <script src="panel.js"></script>
+</body>
+</html>

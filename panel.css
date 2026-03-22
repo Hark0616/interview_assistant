@@ -1,0 +1,389 @@
+/* panel.css — Estilos de layout y componentes específicos del panel pop-out
+ * Usa tokens de shared.css. Complementa los componentes compartidos (ia-*).
+ */
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--ia-bg);
+  color: var(--ia-text);
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ── Stealth banner ── */
+.ia-panel-banner {
+  background: rgba(34,197,94,0.1);
+  border-bottom: 1px solid rgba(34,197,94,0.25);
+  color: var(--ia-success-light);
+  font-size: 11px;
+  text-align: center;
+  padding: 5px 14px;
+  flex-shrink: 0;
+}
+
+/* ── Header ── */
+.ia-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--ia-accent-bg);
+  border-bottom: 1px solid rgba(99,102,241,0.2);
+  flex-shrink: 0;
+}
+
+.ia-panel-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ia-panel-title {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--ia-accent-light);
+  letter-spacing: 0.3px;
+}
+
+.ia-panel-header-buttons {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ia-panel-header-buttons button {
+  background: rgba(255,255,255,0.07);
+  border: 1px solid var(--ia-border);
+  color: var(--ia-text-muted);
+  cursor: pointer;
+  border-radius: var(--ia-r-control);
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  transition: background 0.15s;
+}
+
+.ia-panel-header-buttons button:hover {
+  background: var(--ia-surface-hover);
+  color: var(--ia-text);
+}
+
+#ia-panel-font-btn {
+  font-weight: 700 !important;
+  font-size: 13px !important;
+  letter-spacing: -0.5px;
+}
+
+/* ── Body ── */
+.ia-panel-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+/* ── Disconnected overlay ── */
+.ia-panel-disconnected {
+  position: absolute;
+  inset: 0;
+  background: rgba(15,17,26,0.85);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  color: var(--ia-text-muted);
+  font-size: 14px;
+  z-index: 10;
+}
+
+/* ── Transcript section (panel layout) ── */
+.ia-panel-transcript-section {
+  padding: 8px 14px 6px;
+  max-height: 140px;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  min-height: 0;
+  transition: max-height 0.22s ease, padding 0.22s ease;
+}
+
+.ia-panel-transcript-section.ia-collapsed {
+  max-height: none;
+  padding-bottom: 4px;
+}
+
+.ia-panel-transcript-section.ia-collapsed .ia-panel-transcript-inner { display: none; }
+.ia-panel-transcript-section.ia-collapsed + .ia-panel-divider { display: none; }
+
+.ia-panel-transcript-inner {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.ia-panel-transcript {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  padding-right: 2px;
+}
+
+.ia-panel-transcript::-webkit-scrollbar { width: 3px; }
+.ia-panel-transcript::-webkit-scrollbar-track { background: transparent; }
+.ia-panel-transcript::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: var(--ia-r-hairline); }
+
+/* ── Divider ── */
+.ia-panel-divider {
+  height: 1px;
+  background: rgba(255,255,255,0.07);
+  margin: 0 14px;
+  flex-shrink: 0;
+}
+
+/* ── Suggestion section (panel layout) ── */
+.ia-panel-suggestion-section {
+  padding: 12px 14px 14px 12px;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 120px;
+  min-width: 0;
+  background: linear-gradient(90deg, rgba(99,102,241,0.09) 0%, rgba(99,102,241,0.03) 40%, transparent 100%);
+  border-left: 3px solid rgba(99,102,241,0.5);
+  border-radius: 0 var(--ia-r-block) var(--ia-r-block) 0;
+  margin: 4px 0;
+  overflow: hidden;
+}
+
+.ia-panel-suggestion {
+  flex: 1;
+  overflow-y: auto;
+  line-height: 1.55;
+  color: #f1f5f9;
+  font-size: var(--ia-fs-suggestion);
+  padding-right: 2px;
+  transition: opacity 0.2s;
+}
+
+.ia-panel-suggestion::-webkit-scrollbar { width: 3px; }
+.ia-panel-suggestion::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: var(--ia-r-hairline); }
+
+.ia-panel-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ia-text-muted);
+  font-size: 12px;
+  margin-top: 6px;
+}
+
+/* ── Controls ── */
+.ia-panel-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--ia-border-subtle);
+  background: var(--ia-surface-dim);
+  flex-shrink: 0;
+}
+
+.ia-panel-mode-row,
+.ia-panel-debounce-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ia-panel-mode-toggle {
+  display: flex;
+  margin-left: auto;
+  background: rgba(0,0,0,0.3);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: var(--ia-r-block);
+  overflow: hidden;
+}
+
+.ia-panel-debounce-slider {
+  flex: 1;
+  -webkit-appearance: none;
+  height: 3px;
+  border-radius: var(--ia-r-hairline);
+  background: rgba(255,255,255,0.1);
+  outline: none;
+  cursor: pointer;
+}
+
+.ia-panel-debounce-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--ia-accent);
+  cursor: pointer;
+  box-shadow: 0 0 4px rgba(99,102,241,0.5);
+}
+
+.ia-panel-debounce-val {
+  color: var(--ia-accent-light);
+  font-weight: 700;
+}
+
+/* ── Send button (panel) ── */
+#ia-panel-send-btn {
+  background: rgba(99,102,241,0.2);
+  border: 1px solid var(--ia-accent-border);
+  color: var(--ia-accent-light);
+  border-radius: var(--ia-r-control);
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: none;
+  align-items: center;
+  gap: 4px;
+}
+
+#ia-panel-send-btn:hover { background: var(--ia-accent-bg-hover); }
+
+/* ── Suggestion action buttons ── */
+.ia-panel-suggestion-actions {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.ia-panel-suggestion-actions button:not(#ia-panel-send-btn) {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--ia-text-muted);
+  cursor: pointer;
+  border-radius: var(--ia-r-control);
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+
+.ia-panel-suggestion-actions button:not(#ia-panel-send-btn):hover {
+  background: var(--ia-surface-hover);
+  color: var(--ia-text);
+}
+
+/* ── Note section ── */
+.ia-panel-note-section {
+  padding: 6px 14px 8px;
+  border-top: 1px solid var(--ia-border-subtle);
+  background: rgba(0, 0, 0, 0.12);
+  flex-shrink: 0;
+}
+
+.ia-panel-note-input {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 44px;
+  max-height: 88px;
+  resize: vertical;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  font-family: inherit;
+  color: var(--ia-text);
+  background: var(--ia-surface);
+  border: 1px solid var(--ia-border);
+  border-radius: var(--ia-r-control);
+  outline: none;
+}
+
+.ia-panel-note-input::placeholder {
+  color: var(--ia-text-muted);
+  font-style: italic;
+}
+
+.ia-panel-note-input:focus {
+  border-color: rgba(99, 102, 241, 0.5);
+  background: rgba(99, 102, 241, 0.06);
+}
+
+/* ── Footer ── */
+.ia-panel-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 14px;
+  background: rgba(0,0,0,0.2);
+  border-top: 1px solid rgba(255,255,255,0.05);
+  flex-shrink: 0;
+}
+
+.ia-panel-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ia-panel-status-text {
+  font-size: 11px;
+  color: var(--ia-text-muted);
+  min-width: 0;
+  flex: 1;
+}
+
+#ia-panel-download-log {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--ia-border);
+  color: var(--ia-text-muted);
+  cursor: pointer;
+  border-radius: var(--ia-r-control);
+  padding: 5px 10px;
+  font-size: 14px;
+  line-height: 1;
+  transition: all 0.2s;
+}
+
+#ia-panel-download-log:hover {
+  background: rgba(99,102,241,0.2);
+  border-color: rgba(99,102,241,0.35);
+  color: var(--ia-accent-light);
+}
+
+#ia-panel-activate-btn {
+  background: rgba(99,102,241,0.2);
+  border: 1px solid var(--ia-accent-border);
+  color: var(--ia-accent-light);
+  cursor: pointer;
+  border-radius: var(--ia-r-control);
+  padding: 5px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  transition: all 0.2s;
+}
+
+#ia-panel-activate-btn:hover {
+  background: var(--ia-accent-bg-hover);
+  border-color: rgba(99,102,241,0.6);
+}
+
+#ia-panel-activate-btn.active {
+  background: rgba(239,68,68,0.2);
+  border-color: rgba(239,68,68,0.4);
+  color: var(--ia-error-light);
+}
+
+#ia-panel-activate-btn.active:hover { background: rgba(239,68,68,0.3); }

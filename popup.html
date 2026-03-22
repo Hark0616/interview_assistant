@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Interview Assistant AI</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      width: 340px;
+      background: #0f111a;
+      color: #e2e8f0;
+      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 13px;
+    }
+
+    .header {
+      background: linear-gradient(135deg, rgba(99,102,241,0.25), rgba(139,92,246,0.15));
+      padding: 14px 16px;
+      border-bottom: 1px solid rgba(99,102,241,0.25);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .header-icon {
+      width: 24px;
+      height: 24px;
+      display: block;
+      border-radius: 6px;
+    }
+    .header-title { font-size: 15px; font-weight: 700; color: #a5b4fc; }
+    .header-subtitle { font-size: 11px; color: #475569; margin-top: 1px; }
+
+    .tabs {
+      display: flex;
+      background: rgba(0,0,0,0.3);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+
+    .tab {
+      flex: 1;
+      padding: 9px;
+      text-align: center;
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 500;
+      color: #475569;
+      border-bottom: 2px solid transparent;
+      transition: all 0.2s;
+    }
+
+    .tab.active {
+      color: #a5b4fc;
+      border-bottom-color: #6366f1;
+      background: rgba(99,102,241,0.08);
+    }
+
+    .tab-content { display: none; padding: 14px 16px; }
+    .tab-content.active { display: block; }
+
+    .form-group { margin-bottom: 12px; }
+
+    label {
+      display: block;
+      font-size: 11px;
+      font-weight: 600;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 5px;
+    }
+
+    input, textarea, select {
+      width: 100%;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 8px;
+      color: #e2e8f0;
+      font-size: 12px;
+      padding: 8px 10px;
+      font-family: inherit;
+      transition: border-color 0.2s;
+      outline: none;
+      resize: vertical;
+    }
+
+    input:focus, textarea:focus, select:focus {
+      border-color: rgba(99,102,241,0.6);
+      background: rgba(99,102,241,0.05);
+    }
+
+    textarea { min-height: 70px; line-height: 1.5; }
+
+    select option { background: #1e2130; }
+
+    .hint {
+      font-size: 10px;
+      color: #475569;
+      margin-top: 4px;
+      line-height: 1.4;
+    }
+
+    .hint a { color: #6366f1; text-decoration: none; }
+    .hint a:hover { text-decoration: underline; }
+
+    .api-row {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+
+    .api-row input { flex: 1; }
+
+    .model-row {
+      display: flex;
+      gap: 6px;
+      align-items: stretch;
+    }
+
+    .model-row select { flex: 1; }
+
+    .model-filter-row {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      margin-top: 8px;
+      font-size: 11px;
+      color: #94a3b8;
+    }
+
+    .model-filter-row input { width: auto; accent-color: #6366f1; }
+    .model-filter-row label { cursor: pointer; user-select: none; }
+
+    .btn {
+      background: rgba(99,102,241,0.2);
+      border: 1px solid rgba(99,102,241,0.4);
+      color: #a5b4fc;
+      border-radius: 7px;
+      padding: 7px 12px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.2s;
+    }
+
+    .btn:hover {
+      background: rgba(99,102,241,0.35);
+    }
+
+    .btn-primary {
+      width: 100%;
+      background: rgba(99,102,241,0.3);
+      border-color: rgba(99,102,241,0.6);
+      font-size: 13px;
+      padding: 10px;
+      margin-top: 4px;
+    }
+
+    .btn-primary:hover { background: rgba(99,102,241,0.5); }
+
+    .alert {
+      padding: 8px 10px;
+      border-radius: 7px;
+      font-size: 11px;
+      margin-top: 8px;
+      display: none;
+      line-height: 1.4;
+    }
+
+    .alert-success { background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.3); color: #86efac; }
+    .alert-error   { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); color: #fca5a5; }
+    .alert-info    { background: rgba(99,102,241,0.1); border: 1px solid rgba(99,102,241,0.3); color: #a5b4fc; }
+
+    .alert.alert-animate {
+      opacity: 1;
+      transition: opacity 0.45s ease;
+    }
+
+    /* Evita que el popup cambie de alto al mostrar/ocultar mensajes */
+    #test-result,
+    #save-result,
+    #vault-result {
+      min-height: 44px;
+      box-sizing: border-box;
+    }
+
+    .section-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: #6366f1;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .divider {
+      height: 1px;
+      background: rgba(255,255,255,0.06);
+      margin: 12px 0;
+    }
+
+    .footer {
+      padding: 10px 16px;
+      background: rgba(0,0,0,0.2);
+      border-top: 1px solid rgba(255,255,255,0.05);
+    }
+
+    .footer-version {
+      font-size: 10px;
+      color: #64748b;
+      text-align: center;
+      margin-top: 8px;
+      letter-spacing: 0.2px;
+    }
+
+    #test-result { margin-top: 6px; }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 8px;
+      border-radius: 20px;
+      font-size: 10px;
+      font-weight: 600;
+    }
+
+    .badge-ok  { background: rgba(34,197,94,0.15); color: #86efac; border: 1px solid rgba(34,197,94,0.3); }
+    .badge-err { background: rgba(239,68,68,0.15); color: #fca5a5; border: 1px solid rgba(239,68,68,0.3); }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <img class="header-icon" src="{icons}/icon48.png" alt="Interview Assistant icon">
+    <div>
+      <div class="header-title">Interview Assistant AI</div>
+      <div class="header-subtitle">Asistente de entrevistas en tiempo real</div>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <div class="tab active" data-tab="api">API</div>
+    <div class="tab" data-tab="profile">Perfil</div>
+    <div class="tab" data-tab="job">Puesto</div>
+  </div>
+
+  <!-- TAB: API -->
+  <div class="tab-content active" id="tab-api">
+    <div class="section-title">Configuración de API</div>
+
+    <div class="form-group">
+      <label>Proveedor de IA</label>
+      <select id="provider">
+        <option value="gemini">Google Gemini (gratis, recomendado)</option>
+        <option value="groq">Groq (gratis con registro)</option>
+        <option value="openrouter">OpenRouter (modelos :free)</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label>API Key</label>
+      <div class="api-row">
+        <input type="password" id="apiKey" placeholder="API key del proveedor seleccionado">
+        <button class="btn" id="test-btn">Probar</button>
+      </div>
+      <div class="hint" id="api-hint">
+        Gratis en <a href="https://aistudio.google.com/apikey" target="_blank">aistudio.google.com/apikey</a> → "Get API Key" → "Create API key"
+      </div>
+      <div id="test-result"></div>
+    </div>
+
+    <div class="form-group">
+      <label>Modelo</label>
+      <div class="model-row">
+        <select id="model"></select>
+        <button type="button" class="btn" id="refresh-models-btn" title="Cargar modelos desde la API del proveedor">Actualizar</button>
+      </div>
+      <div class="model-filter-row" id="openrouter-free-row">
+        <label>
+          <input type="checkbox" id="openrouter-free-only" checked>
+          OpenRouter: solo modelos sin coste (:free o precio 0)
+        </label>
+      </div>
+      <div class="hint" id="model-hint">Carga la lista real con el botón Actualizar (requiere API key del proveedor seleccionado).</div>
+    </div>
+
+    <div class="form-group">
+      <label>Tu nombre en Google Meet</label>
+      <input type="text" id="myName" placeholder="Nombre en subtítulos de Meet (p. ej. nombre propio o la etiqueta &quot;Tú&quot;)">
+      <div class="hint">Debe coincidir con el nombre que muestra Meet en captions para distinguir tus líneas.</div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="section-title">Cofre de claves (opcional)</div>
+    <div class="hint" style="margin-bottom:10px">
+      Guarda las API keys en un archivo en tu PC vía un servidor que solo escucha en <strong>127.0.0.1</strong> (no abras el puerto en el router).
+      Ver <code>scripts/vault-server.mjs</code> y README «Cofre local».
+    </div>
+    <div class="form-group">
+      <label>URL del cofre</label>
+      <input type="text" id="vaultUrl" placeholder="http://127.0.0.1:3847" autocomplete="off">
+    </div>
+    <div class="form-group">
+      <label>Token del cofre (Bearer)</label>
+      <input type="password" id="vaultToken" placeholder="Mismo valor que IA_VAULT_TOKEN" autocomplete="off">
+    </div>
+    <div class="api-row" style="flex-wrap:wrap">
+      <button type="button" class="btn" id="vault-pull-btn" title="Descargar apiKeys al popup">Traer claves</button>
+      <button type="button" class="btn" id="vault-push-btn" title="Subir las tres claves actuales al archivo">Enviar claves</button>
+    </div>
+    <div id="vault-result"></div>
+  </div>
+
+  <!-- TAB: PERFIL -->
+  <div class="tab-content" id="tab-profile">
+    <div class="section-title">Tu perfil profesional</div>
+
+    <div class="form-group">
+      <label>CV / Perfil resumido</label>
+      <textarea id="cvProfile" rows="6" placeholder="Resumen de experiencia, stack técnico, años en el sector y logros breves (cuanto más concreto, mejor personaliza la IA)."></textarea>
+      <div class="hint">Texto libre: CV corto o viñetas. La IA lo usa como base para las sugerencias.</div>
+    </div>
+  </div>
+
+  <!-- TAB: PUESTO -->
+  <div class="tab-content" id="tab-job">
+    <div class="section-title">Información del puesto</div>
+
+    <div class="form-group">
+      <label>Descripción del puesto</label>
+      <textarea id="jobDescription" rows="4" placeholder="Requisitos del puesto, responsabilidades y tecnologías que menciona la oferta."></textarea>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="form-group">
+      <label>Empresa</label>
+      <textarea id="company" rows="3" placeholder="Sector, tamaño aproximado y qué hace la empresa (opcional, ayuda al contexto)."></textarea>
+    </div>
+  </div>
+
+  <div class="footer">
+    <button class="btn btn-primary" id="save-btn">Guardar configuración</button>
+    <div id="save-result"></div>
+    <div class="footer-version" id="footer-version" aria-live="polite"></div>
+  </div>
+
+  <script src="utils.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

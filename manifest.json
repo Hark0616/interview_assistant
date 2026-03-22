@@ -1,0 +1,54 @@
+{
+  "manifest_version": 3,
+  "name": "Interview Assistant AI",
+  "version": "1.3.4",
+  "description": "Asistente de entrevistas en tiempo real para Google Meet",
+  "permissions": ["storage", "activeTab"],
+  "host_permissions": [
+    "https://meet.google.com/*",
+    "https://generativelanguage.googleapis.com/*",
+    "https://api.groq.com/*",
+    "https://openrouter.ai/*",
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["https://meet.google.com/*"],
+      "js": [
+        "utils.js",
+        "captionCapture.js",
+        "sessionLog.js",
+        "aiClient.js",
+        "overlayUI.js",
+        "content.js"
+      ],
+      "css": ["shared.css", "content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Interview Assistant AI",
+    "default_icon": {
+      "16": "{icons}/icon16.png",
+      "32": "{icons}/icon32.png"
+    }
+  },
+  "icons": {
+    "16": "{icons}/icon16.png",
+    "32": "{icons}/icon32.png",
+    "48": "{icons}/icon48.png",
+    "128": "{icons}/icon128.png"
+  },
+  "commands": {
+    "toggle-overlay-stealth": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+H",
+        "mac": "Command+Shift+H"
+      },
+      "description": "Ocultar o mostrar el asistente en la pestaña de Meet activa"
+    }
+  }
+}

@@ -1,0 +1,28 @@
+---
+description: Política de versiones del proyecto Interview Assistant (manifest + CHANGELOG)
+globs: manifest.json,CHANGELOG.md,README.md
+alwaysApply: true
+---
+
+# Versiones (Interview Assistant)
+
+Al **terminar cambios** en esta extensión:
+
+1. **Actualizar** `manifest.json` → campo `"version"` (formato `MAJOR.MINOR.PATCH`, p. ej. `1.3.3`).
+2. **Actualizar** `CHANGELOG.md` con una entrada bajo la nueva versión (1–3 viñetas).
+3. El popup muestra la versión vía `chrome.runtime.getManifest()`; no hace falta tocar `popup.js` salvo que el texto sea manual.
+
+## Cuándo subir cada dígito
+
+| Nivel | Cuándo |
+|-------|--------|
+| **PATCH** (tercer dígito, p. ej. 1.3.2 → 1.3.3) | Tras **cualquier** cambio habitual: fixes, textos, ajustes pequeños, reglas de Cursor, docs menores. |
+| **MINOR** (segundo dígito, p. ej. 1.3.x → 1.4.0) | Cambios **muy significativos**: funcionalidad nueva grande, refactor arquitectónico relevante, flujos nuevos que afectan a muchos usuarios del código, o cambios de permisos/APIs de extensión notables. Resetear PATCH a **0**. |
+| **MAJOR** (1.x.x → 2.0.0) | Rompedores extremos o reescritura mayor (raro en este proyecto). |
+
+**Regla práctica:** si dudas entre PATCH y MINOR, usa **PATCH** salvo que el cambio sea claramente “release mediano”.
+
+## Archivos
+
+- Fuente de verdad: **`manifest.json`**.
+- Historial: **`CHANGELOG.md`**.
