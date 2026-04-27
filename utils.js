@@ -24,7 +24,7 @@
       const esc = window.__ia.utils.escapeHtml;
       return lines.map(c => {
         const isMe = c.role === 'me';
-        const name = c.speaker || (isMe ? (myName || 'Yo') : 'Entrevistador');
+        const name = c.speaker || (isMe ? (myName || 'Yo') : 'Desconocido');
         return `<div class="ia-caption-line ${isMe ? 'ia-me' : 'ia-other'}">
           <span class="ia-speaker">${esc(name)}</span>
           <span class="ia-text">${esc(c.text)}</span>

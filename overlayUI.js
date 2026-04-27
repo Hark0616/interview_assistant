@@ -410,7 +410,7 @@
           <div id="ia-header-buttons">
             <span id="ia-status-dot" class="ia-status-dot" title="Estado"></span>
             <button id="ia-font-btn" title="Tamaño de letra">A</button>
-            <button id="ia-popout-btn" title="Ventana separada (no se ve al compartir solo la pestaña de Meet). Atajo ocultar overlay: Ctrl+Shift+H o el que configures en Extensiones → Atajos de teclado">↗</button>
+            <button id="ia-popout-btn" title="Ventana separada (no se ve al compartir solo la pestaña de la reunión). Atajo ocultar overlay: Ctrl+Shift+H o el que configures en Extensiones → Atajos de teclado">↗</button>
             <button id="ia-toggle-btn" title="Minimizar">-</button>
             <button id="ia-close-btn" title="Cerrar">X</button>
           </div>

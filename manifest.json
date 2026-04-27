@@ -1,11 +1,16 @@
 {
   "manifest_version": 3,
   "name": "Interview Assistant AI",
-  "version": "1.3.4",
-  "description": "Asistente de entrevistas en tiempo real para Google Meet",
+  "version": "1.4.2",
+  "description": "Asistente de entrevistas en tiempo real para Google Meet y Microsoft Teams",
   "permissions": ["storage", "activeTab"],
   "host_permissions": [
     "https://meet.google.com/*",
+    "https://teams.microsoft.com/*",
+    "https://teams.live.com/*",
+    "https://*.teams.microsoft.com/*",
+    "https://teams.cloud.microsoft/*",
+    "https://*.teams.cloud.microsoft/*",
     "https://generativelanguage.googleapis.com/*",
     "https://api.groq.com/*",
     "https://openrouter.ai/*",
@@ -15,13 +20,21 @@
   "background": { "service_worker": "background.js" },
   "content_scripts": [
     {
-      "matches": ["https://meet.google.com/*"],
+      "matches": [
+        "https://meet.google.com/*",
+        "https://teams.microsoft.com/*",
+        "https://teams.live.com/*",
+        "https://*.teams.microsoft.com/*",
+        "https://teams.cloud.microsoft/*",
+        "https://*.teams.cloud.microsoft/*"
+      ],
       "js": [
         "utils.js",
         "captionCapture.js",
         "sessionLog.js",
         "aiClient.js",
         "overlayUI.js",
+        "meetChatSelfLogPoc.js",
         "content.js"
       ],
       "css": ["shared.css", "content.css"],
@@ -48,7 +61,7 @@
         "default": "Ctrl+Shift+H",
         "mac": "Command+Shift+H"
       },
-      "description": "Ocultar o mostrar el asistente en la pestaña de Meet activa"
+      "description": "Ocultar o mostrar el asistente en la pestaña de reunión activa"
     }
   }
 }

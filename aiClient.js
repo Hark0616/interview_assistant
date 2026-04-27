@@ -123,7 +123,7 @@
         'Prioriza responder a lo más reciente del entrevistador.';
       if (lastIntIdx < 0) {
         preamble +=
-          ' No hay líneas etiquetadas como [ENTREVISTADOR] en este tramo (revisa "Tu nombre en Meet" en el popup); infiere la pregunta a partir del texto.';
+          ' No hay líneas etiquetadas como [ENTREVISTADOR] en este tramo (revisa «Tu nombre» en el popup de la extensión); infiere la pregunta a partir del texto.';
       }
       preamble += '\n\n';
 
@@ -191,7 +191,7 @@
       if (recentLines.length === 0) {
         const msg = state.captionBuffer.length > 0
           ? 'No hay subtítulos nuevos desde la última sugerencia. Espera a que hablen y vuelve a pulsar «Enviar ahora».'
-          : 'No hay subtítulos en contexto. Activa captions en Meet y espera texto.';
+          : 'No hay subtítulos en contexto. Activa los subtítulos en directo y espera texto.';
         modules.ui.displaySuggestion(msg, true);
         return;
       }
