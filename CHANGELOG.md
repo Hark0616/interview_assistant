@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.5.0
+
+- **Streaming de Sugerencias**: Se implementó una conexión persistente por puerto (`chrome.runtime.Port`) para transmitir la sugerencia en tiempo real token por token, reduciendo la latencia percibida a menos de 0.5 segundos.
+- **Búfer de Contexto Ampliado (Smart Context)**: Se incrementó el límite de caracteres del digest de la reunión a 45,000 caracteres en las constantes para evitar que la IA pierda contexto de la llamada y se ampliaron los límites de condensación de CV y empresa para preservar detalles y skills específicos.
+- **Prompts del Sistema Adaptativos**: Se agregaron reglas dinámicas de comportamiento en el system prompt para que la IA responda estructurando con el método STAR (para preguntas conductuales), viñetas concisas (preguntas de arquitectura/técnicas) o respuestas cortas y naturales.
+- **Compatibilidad de Linter y Test**: Se corrigió ESLint flat config para resolver variables de node/browser en carpetas de tests y scripts, y se mockeó la API del puerto de Chrome en Vitest.
+
 ## 1.4.4
 
 - Robustez de respuesta ante subtítulos ruidosos: el prompt ahora obliga a inferir intención y responder directo, evitando pedir aclaraciones o mencionar problemas de transcripción.
