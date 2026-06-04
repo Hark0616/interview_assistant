@@ -89,7 +89,6 @@ describe('captionCapture.js - Microsoft Teams Logic', () => {
     
     // Caso D: Orador externo
     expect(captionCapture.isSelfSpeaker('Entrevistador Senior')).toBe(false);
-
     // Caso E: Orador vacío (no debe detectarlo como self speaker por coincidencia parcial con "")
     expect(captionCapture.isSelfSpeaker('')).toBe(false);
     expect(captionCapture.isSelfSpeaker('   ')).toBe(false);

@@ -51,7 +51,6 @@
       }
       return false;
     }
-
     function isTeamsHost() {
       const h = location.hostname;
       return h === 'teams.microsoft.com'
