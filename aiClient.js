@@ -57,12 +57,13 @@
     function buildSystemPrompt() {
       const myName = state.config?.myName || 'el candidato';
       const profile = state.condensedProfile || state.config?.cvProfile || '';
+      const company = state.condensedCompany || state.config?.company || '';
 
       const sections = [`Eres un asistente INVISIBLE de entrevistas en tiempo real para ${myName}.`];
 
       if (profile) sections.push(`PERFIL:\n${profile}`);
       if (state.config?.jobDescription) sections.push(`PUESTO:\n${state.config.jobDescription}`);
-      if (state.config?.company) sections.push(`EMPRESA:\n${state.config.company}`);
+      if (company) sections.push(`EMPRESA:\n${company}`);
 
       const userNote = String(state.userNote || '').trim();
       if (userNote) {
@@ -74,10 +75,14 @@
       sections.push(`REGLAS:
 - SOLO lo que el candidato diría, sin etiquetas ni prefijos
 - Primera persona directa, máximo 3 puntos de 1-2 oraciones
-- Datos REALES del perfil. Mismo idioma que el entrevistador
+- Datos REALES del perfil.
+- IDIOMA: Responde SIEMPRE en el mismo idioma en el que habla/pregunta el entrevistador en el último tramo. Si te habla/pregunta en inglés, responde obligatoriamente en inglés. Si habla en español, en español. Traduce la información de tu perfil/CV o empresa al idioma correspondiente si es necesario.
 - El usuario puede enviar un bloque largo: todo lo dicho desde su última intervención; usa el hilo completo como contexto
 - Si aparece <<< RESPONDE A ESTO, prioriza eso (última intervención del entrevistador en el bloque); si no hay marca, infiere la pregunta principal del texto
-- Sé coherente con tus respuestas anteriores (turnos previos), no te repitas`);
+- Sé coherente con tus respuestas anteriores (turnos previos), no te repitas
+- NUNCA pidas aclaración ni hagas preguntas de vuelta; SIEMPRE da una respuesta directa aunque el contexto sea incompleto
+- La transcripción puede tener errores de reconocimiento de voz (palabras cortadas, repeticiones, ruido): IGNÓRALOS, infiere la intención real de la pregunta y responde
+- NUNCA menciones la transcripción, el sistema, la calidad del audio ni que eres un asistente; actúa como si fueras directamente el candidato pensando en voz alta`);
 
       return sections.join('\n\n');
     }
@@ -115,6 +120,39 @@
       }
     }
 
+    async function generateCondensedCompany() {
+      const companyText = state.config?.company || '';
+
+      if (!state.config?.apiKey || !companyText || companyText.length < 400) {
+        state.condensedCompany = companyText;
+        return;
+      }
+
+      modules.ui.updateStatus('Condensando empresa...', 'active');
+
+      const response = await sendMessageAsync({
+        type: 'GET_AI_SUGGESTION',
+        data: {
+          provider: state.config.provider || 'gemini',
+          apiKey: state.config.apiKey,
+          model: state.config.model,
+          systemPrompt: 'Condensa información. Responde SOLO con el resumen.',
+          messages: [{
+            role: 'user',
+            content: `Condensa esta descripción de empresa en máximo 100 palabras. Conserva industria, tipo de producto/servicio, cultura relevante para entrevista y datos diferenciales útiles para contextualizar respuestas.\n\n${companyText}`
+          }]
+        }
+      });
+
+      if (response?.success && response.suggestion) {
+        state.condensedCompany = response.suggestion;
+        modules.ui.updateStatus('Empresa condensada', 'active');
+      } else {
+        state.condensedCompany = companyText.substring(0, 800);
+        modules.ui.updateStatus('Empresa truncada (error al condensar)', 'active');
+      }
+    }
+
     function buildConversationPayload(recentLines) {
       const lastIntIdx = findLastIndex(recentLines, (c) => c.role === 'interviewer');
 
@@ -123,7 +161,7 @@
         'Prioriza responder a lo más reciente del entrevistador.';
       if (lastIntIdx < 0) {
         preamble +=
-          ' No hay líneas etiquetadas como [ENTREVISTADOR] en este tramo (revisa "Tu nombre en Meet" en el popup); infiere la pregunta a partir del texto.';
+          ' No hay líneas etiquetadas como [ENTREVISTADOR] en este tramo (revisa «Tu nombre» en el popup de la extensión); infiere la pregunta a partir del texto.';
       }
       preamble += '\n\n';
 
@@ -177,6 +215,10 @@
       state.suggestionHistory.push({ question: historyQuestion, answer: suggestionText, timestamp: Date.now() });
       if (state.suggestionHistory.length > 10) state.suggestionHistory.shift();
 
+      if (String(state.userNote || '').trim()) {
+        modules.ui.setUserNote('');
+      }
+
       modules.ui.displaySuggestion(suggestionText);
     }
 
@@ -191,7 +233,7 @@
       if (recentLines.length === 0) {
         const msg = state.captionBuffer.length > 0
           ? 'No hay subtítulos nuevos desde la última sugerencia. Espera a que hablen y vuelve a pulsar «Enviar ahora».'
-          : 'No hay subtítulos en contexto. Activa captions en Meet y espera texto.';
+          : 'No hay subtítulos en contexto. Activa los subtítulos en directo y espera texto.';
         modules.ui.displaySuggestion(msg, true);
         return;
       }
@@ -231,6 +273,7 @@
     return {
       requestSuggestion,
       generateCondensedProfile,
+      generateCondensedCompany,
       buildSystemPrompt,
       sendMessageAsync
     };

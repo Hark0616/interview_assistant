@@ -3,6 +3,7 @@
 // La gestión del panel pop-out vive en panelManager.js (importScripts).
 
 importScripts('panelManager.js');
+const DEBUG_PROMPT_LOGS = true;
 
 // Atajo global (configurable en chrome://extensions/shortcuts) → pestaña Meet activa
 chrome.commands.onCommand.addListener((command) => {
@@ -168,14 +169,78 @@ const PROVIDERS = {
   }
 };
 
+async function fetchWithRetry(url, options, maxRetries = 3, initialDelayMs = 500) {
+  let delay = initialDelayMs;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await fetch(url, options);
+      if (response.ok) {
+        return response;
+      }
+      
+      const shouldRetry = response.status === 429 || (response.status >= 500 && response.status < 600);
+      if (!shouldRetry || attempt === maxRetries) {
+        return response;
+      }
+      
+      console.warn(`[background] Intento ${attempt} falló con estado ${response.status}. Reintentando en ${delay}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      delay *= 2;
+    } catch (err) {
+      if (attempt === maxRetries) {
+        throw err;
+      }
+      console.warn(`[background] Intento ${attempt} falló por error de red: ${err.message}. Reintentando en ${delay}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      delay *= 2;
+    }
+  }
+}
+
 async function handleAISuggestion({ provider, apiKey, model, systemPrompt, messages }) {
   const prov = PROVIDERS[provider] || PROVIDERS.gemini;
 
   const url = prov.buildUrl(apiKey, model);
   const headers = prov.buildHeaders(apiKey);
   const body = prov.buildBody(systemPrompt, messages, model);
+  if (DEBUG_PROMPT_LOGS) {
+    const systemChars = String(systemPrompt || '').length;
+    const messageChars = (messages || []).reduce((sum, m) => sum + String(m?.content || '').length, 0);
+    const approxInputTokens = Math.ceil((systemChars + messageChars) / 4);
+    const safeBody = JSON.parse(JSON.stringify(body));
 
-  const response = await fetch(url, {
+    // Evita exponer API key en logs.
+    if (safeBody?.systemInstruction?.parts?.[0]?.text) {
+      safeBody.systemInstruction.parts[0].text = safeBody.systemInstruction.parts[0].text.slice(0, 1200);
+    }
+    if (Array.isArray(safeBody?.contents)) {
+      safeBody.contents = safeBody.contents.map((c) => ({
+        ...c,
+        parts: Array.isArray(c.parts)
+          ? c.parts.map((p) => ({ ...p, text: String(p.text || '').slice(0, 1200) }))
+          : c.parts
+      }));
+    }
+    if (Array.isArray(safeBody?.messages)) {
+      safeBody.messages = safeBody.messages.map((m) => ({
+        ...m,
+        content: String(m.content || '').slice(0, 1200)
+      }));
+    }
+
+    console.group('[IA DEBUG] Request');
+    console.log('provider:', provider);
+    console.log('model:', model);
+    console.log('url:', url.split('?')[0]);
+    console.log('systemPrompt chars:', systemChars);
+    console.log('messages:', Array.isArray(messages) ? messages.length : 0);
+    console.log('messages chars:', messageChars);
+    console.log('approx input tokens:', approxInputTokens);
+    console.log('request body (preview, truncated):', safeBody);
+    console.groupEnd();
+  }
+
+  const response = await fetchWithRetry(url, {
     method: 'POST',
     headers,
     body: JSON.stringify(body)

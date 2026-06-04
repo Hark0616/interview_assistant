@@ -136,6 +136,7 @@
         (async () => {
           modules.sessionLog.resetSessionLog();
           if (!state.condensedProfile) await modules.ai.generateCondensedProfile();
+          if (!state.condensedCompany) await modules.ai.generateCondensedCompany();
           modules.captionCapture.startCaptionObserver();
           if (btn) { btn.textContent = 'Detener'; btn.disabled = false; btn.classList.add('active'); }
         })();
@@ -410,7 +411,7 @@
           <div id="ia-header-buttons">
             <span id="ia-status-dot" class="ia-status-dot" title="Estado"></span>
             <button id="ia-font-btn" title="Tamaño de letra">A</button>
-            <button id="ia-popout-btn" title="Ventana separada (no se ve al compartir solo la pestaña de Meet). Atajo ocultar overlay: Ctrl+Shift+H o el que configures en Extensiones → Atajos de teclado">↗</button>
+            <button id="ia-popout-btn" title="Ventana separada (no se ve al compartir solo la pestaña de la reunión). Atajo ocultar overlay: Ctrl+Shift+H o el que configures en Extensiones → Atajos de teclado">↗</button>
             <button id="ia-toggle-btn" title="Minimizar">-</button>
             <button id="ia-close-btn" title="Cerrar">X</button>
           </div>
@@ -470,9 +471,9 @@
         </div>
 
         <div id="ia-note-section">
-          <label class="ia-note-label" for="ia-user-note">Nota para la IA</label>
+          <label class="ia-note-label" for="ia-user-note">Nota puntual (se borra al enviar)</label>
           <textarea id="ia-user-note" rows="2" maxlength="1200"
-            placeholder="Instrucciones puntuales para esta parte de la entrevista (tono, tema a priorizar, etc.). Se aplica hasta que borres el texto."
+            placeholder="Contexto puntual para la siguiente petición. Se enviará una vez y luego se limpia automáticamente."
             spellcheck="true"></textarea>
         </div>
 
@@ -489,6 +490,13 @@
       setupOverlayEvents();
       makeDraggable(state.overlay);
     }
+
+    // Latido periódico para mantener vivo el canal con el panel flotante y evitar falsas desconexiones.
+    setInterval(() => {
+      if (state.panelActive) {
+        sendPanelUpdate();
+      }
+    }, 10000);
 
     // ── Interfaz pública del módulo ──
 

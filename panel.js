@@ -42,11 +42,37 @@
   let transcriptCollapsed = false;
   let currentSuggestionText = '';
   let fontIdx = 0;
+  let noteErrorTimer = null;
 
   // ── Comunicación con content script (vía background relay) ──
 
-  function sendCommand(command, data) {
-    chrome.runtime.sendMessage({ type: 'IA_PANEL_COMMAND', command, data }).catch(() => {});
+  function showNoteRelayError(message) {
+    if (!el.userNote || !el.statusText) return;
+    el.userNote.classList.add('ia-note-relay-error');
+    el.statusText.textContent = message;
+    clearTimeout(noteErrorTimer);
+    noteErrorTimer = setTimeout(() => {
+      el.userNote.classList.remove('ia-note-relay-error');
+    }, 2000);
+  }
+
+  function clearNoteRelayError() {
+    if (!el.userNote) return;
+    el.userNote.classList.remove('ia-note-relay-error');
+  }
+
+  function sendCommand(command, data, opts = {}) {
+    const { silent = false } = opts;
+    return chrome.runtime.sendMessage({ type: 'IA_PANEL_COMMAND', command, data })
+      .then(() => {
+        if (command === 'setNote') clearNoteRelayError();
+      })
+      .catch((err) => {
+        if (!silent && command === 'setNote') {
+          const detail = err?.message ? ` (${err.message})` : '';
+          showNoteRelayError(`No se pudo sincronizar la nota${detail}`);
+        }
+      });
   }
 
   // ── Actualización de UI desde estado recibido ──
@@ -196,5 +222,7 @@
   // ── Init ──
 
   setupEvents();
-  chrome.runtime.sendMessage({ type: 'IA_PANEL_READY' }).catch(() => {});
+  chrome.runtime.sendMessage({ type: 'IA_PANEL_READY' }).catch(() => {
+    showNoteRelayError('Panel sin conexión con la reunión');
+  });
 })();

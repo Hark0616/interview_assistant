@@ -1,7 +1,7 @@
 # Interview Assistant AI — Extensión de Chrome
 
-Asistente de entrevistas en tiempo real para Google Meet.
-Lee los subtítulos de Meet, identifica quién habla, y genera sugerencias de respuesta con IA.
+Asistente de entrevistas en tiempo real para **Google Meet** y **Microsoft Teams** (en el navegador).
+Lee los subtítulos en directo, identifica quién habla, y genera sugerencias de respuesta con IA.
 
 Soporta **Gemini** (gratis), **Groq** (gratis) y **OpenRouter** (modelos gratuitos disponibles).
 
@@ -34,8 +34,8 @@ Soporta **Gemini** (gratis), **Groq** (gratis) y **OpenRouter** (modelos gratuit
 
 ## Cómo usar durante la entrevista
 
-1. Entra a Google Meet normalmente
-2. **Activa los subtítulos** (botón CC en la barra inferior de Meet)
+1. Abre la reunión en **Meet** o **Teams** en el navegador (Chrome/Edge)
+2. **Activa los subtítulos en directo** (CC en Meet; en Teams: Más opciones → Activar subtítulos en directo, según tu cliente)
 3. Verás el overlay flotante en la esquina inferior derecha
 4. Clic en **Activar** en el overlay
 5. La IA generará sugerencias automáticamente cuando el entrevistador hable

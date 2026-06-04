@@ -9,8 +9,16 @@
   window.__ia.createSessionLog = function (state, C, _modules) {
 
     function getMeetingCodeFromUrl() {
-      const m = window.location.pathname.match(/\/([a-z]{3}-[a-z]{4}-[a-z]{3})/i);
-      return m ? m[1] : 'meet';
+      const meetMatch = window.location.pathname.match(/\/([a-z]{3}-[a-z]{4}-[a-z]{3})/i);
+      if (meetMatch) return meetMatch[1];
+      const hashPath = window.location.hash + window.location.pathname;
+      const teamsMatch =
+        hashPath.match(/meetup-join[^/]*\/([^/&?#]{8,})/i)
+        || window.location.pathname.match(/\/meet\/([^/?#]+)/i);
+      if (teamsMatch) return teamsMatch[1].slice(0, 20);
+      const h = location.hostname;
+      if (h.includes('teams')) return 'teams';
+      return 'meet';
     }
 
     function trimSessionTranscript() {
@@ -196,7 +204,7 @@
       const lines = [
         '=== Interview Assistant — registro de reunión ===',
         `Sesión: ${state.meetingSessionId || '(sin id)'}`,
-        `Meet: ${getMeetingCodeFromUrl()}`,
+        `Reunión: ${getMeetingCodeFromUrl()}`,
         `URL: ${window.location.href}`,
         `Generado: ${iso(Date.now())}`,
         '',
@@ -231,7 +239,7 @@
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `meet-ia-${getMeetingCodeFromUrl()}-${Date.now()}.txt`;
+      a.download = `ia-session-${getMeetingCodeFromUrl()}-${Date.now()}.txt`;
       a.rel = 'noopener';
       document.body.appendChild(a);
       a.click();

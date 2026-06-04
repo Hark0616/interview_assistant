@@ -1,4 +1,4 @@
-// captionCapture.js — Captura de subtítulos de Google Meet (DOM scraping + MutationObserver)
+// captionCapture.js — Captura de subtítulos: Google Meet + Microsoft Teams web (DOM + MutationObserver)
 // Factory: window.__ia.createCaptionCapture(state, C, modules)
 // Dependencias cruzadas (late binding): modules.sessionLog, modules.ui, modules.ai
 
@@ -9,6 +9,57 @@
   window.__ia.createCaptionCapture = function (state, C, modules) {
 
     const SELF_SPEAKER_NAMES = ['tú', 'you', 'yo', 'ich', 'je', 'tu'];
+
+    // Mensajes de sistema de Teams/Meet que no son diálogo real.
+    // Se comparan en minúsculas; se descartan si coinciden exactamente o empiezan con alguno de estos prefijos.
+    const SYSTEM_MESSAGE_EXACT = new Set([
+      'close caption has started.',
+      'close captions have started.',
+      'live captions have started.',
+      'live captions have ended.',
+      'live captions are on.',
+      'live captions are off.',
+      'captions are now available.',
+      'captions are now on.',
+      'captions are now off.',
+      'captions have started.',
+      'captions have ended.',
+      'closed captions started.',
+      'closed captions ended.',
+      'caption has started.',
+      'subtítulos en directo iniciados.',
+      'subtítulos en directo finalizados.',
+      'los subtítulos han comenzado.',
+      'se han iniciado los subtítulos.',
+    ]);
+
+    const SYSTEM_MESSAGE_PREFIXES = [
+      'close caption has',
+      'live captions have',
+      'live captions are',
+      'captions are now',
+      'captions have',
+      'closed captions',
+      'subtítulos en directo',
+    ];
+
+    function isSystemMessage(text) {
+      const lower = text.toLowerCase().trim();
+      if (SYSTEM_MESSAGE_EXACT.has(lower)) return true;
+      for (const prefix of SYSTEM_MESSAGE_PREFIXES) {
+        if (lower.startsWith(prefix)) return true;
+      }
+      return false;
+    }
+
+    function isTeamsHost() {
+      const h = location.hostname;
+      return h === 'teams.microsoft.com'
+        || h === 'teams.live.com'
+        || h === 'teams.cloud.microsoft'
+        || h.endsWith('.teams.microsoft.com')
+        || h.endsWith('.teams.cloud.microsoft');
+    }
 
     function extractFromAriaLive(container) {
       const text = container.textContent.trim();
@@ -58,8 +109,12 @@
 
     function isSelfSpeaker(speaker) {
       const s = speaker.toLowerCase().trim();
+      if (!s) return false;
       if (SELF_SPEAKER_NAMES.includes(s)) return true;
-      if (state.config?.myName && s.includes(state.config.myName.toLowerCase())) return true;
+      if (state.config?.myName) {
+        const myName = state.config.myName.toLowerCase().trim();
+        if (myName && (s.includes(myName) || myName.includes(s))) return true;
+      }
       return false;
     }
 
@@ -73,9 +128,8 @@
         if (!text || text.length <= 3) continue;
         if (state.seenBlockText.get(block) === text) continue;
         state.seenBlockText.set(block, text);
-        if (state.lastSeenTextsPerSpeaker.get(speaker) === text) continue;
-        state.lastSeenTextsPerSpeaker.set(speaker, text);
-        onNewCaption({ speaker, text });
+        
+        onNewCaption({ speaker, text, block });
       }
 
       if (blocks.length === 0) {
@@ -86,12 +140,58 @@
             if (!data?.text) continue;
             if (state.seenBlockText.get(el) === data.text) continue;
             state.seenBlockText.set(el, data.text);
-            const fallbackSpeaker = data.speaker || '';
-            if (state.lastSeenTextsPerSpeaker.get(fallbackSpeaker) === data.text) continue;
-            state.lastSeenTextsPerSpeaker.set(fallbackSpeaker, data.text);
-            onNewCaption(data);
+            onNewCaption({ ...data, block: el });
           }
         }
+      }
+    }
+
+    /**
+     * Microsoft Teams web: subtítulos en bloques Fluent UI (data-tid confirmados en HTML real).
+     * Fallback: regiones aria-live con patrón "Orador: texto" (extractFromAriaLive).
+     */
+    function processTeamsCaptionBlocks() {
+      const blocks = document.querySelectorAll('.fui-ChatMessageCompact');
+      if (blocks.length > 0) {
+        for (const block of blocks) {
+          const speaker =
+            block.querySelector('[data-tid="author"]')?.textContent?.trim()
+            || block.querySelector('.fui-ChatMessageCompact__author')?.textContent?.trim()
+            || 'Desconocido';
+
+          const textEl = block.querySelector('[data-tid="closed-caption-text"]');
+          const text = textEl?.textContent?.trim() || '';
+
+          if (!text || text.length <= 2) continue;
+
+          // Si el texto de este bloque específico no ha cambiado, saltar
+          if (state.seenBlockText.get(block) === text) continue;
+          state.seenBlockText.set(block, text);
+
+          // Para Teams, si es un bloque nuevo de la misma persona, queremos ANEXAR,
+          // no sobrescribir (como hace Meet que usa un solo bloque que crece).
+          onNewCaption({ speaker, text, block });
+        }
+        return;
+      }
+      // Fallback a estrategias generales si no hay bloques FUI
+      for (const strategy of CAPTION_STRATEGIES) {
+        const elements = document.querySelectorAll(strategy.container);
+        for (const el of elements) {
+          const data = strategy.getText(el);
+          if (!data?.text) continue;
+          if (state.seenBlockText.get(el) === data.text) continue;
+          state.seenBlockText.set(el, data.text);
+          onNewCaption({ speaker: data.speaker || 'Desconocido', text: data.text, block: el });
+        }
+      }
+    }
+
+    function runCaptionProcessor() {
+      if (isTeamsHost()) {
+        processTeamsCaptionBlocks();
+      } else {
+        processCaptionBlocks();
       }
     }
 
@@ -99,17 +199,24 @@
       if (state.captionObserver) state.captionObserver.disconnect();
       if (state.captionPollInterval) clearInterval(state.captionPollInterval);
 
-      const captionRoot = document.querySelector('[aria-label="Subtítulos"]')
-                       || document.querySelector('[aria-label="Captions"]')
-                       || document.querySelector('.vNKgIf')
-                       || document.body;
+      const isTeams = isTeamsHost();
+      // Teams V2 usa virtualized lists. Intentamos encontrar el scroll container o el padre de los bloques.
+      const captionRoot = isTeams
+        ? (document.querySelector('[data-tid="closed-caption-v2-virtual-list-content"]')
+            || document.querySelector('.fui-ChatMessageCompact')?.parentElement
+            || document.querySelector('[data-tid="closed-captions-v2-items-renderer"]')?.closest('.fui-Flex')
+            || document.body)
+        : (document.querySelector('[aria-label="Subtítulos"]')
+            || document.querySelector('[aria-label="Captions"]')
+            || document.querySelector('.vNKgIf')
+            || document.body);
 
       state.captionObserver = new MutationObserver(() => {
         if (!state.isActive || !state.config) return;
         if (state.captionProcessRAF) return;
         state.captionProcessRAF = requestAnimationFrame(() => {
           state.captionProcessRAF = null;
-          processCaptionBlocks();
+          runCaptionProcessor();
         });
       });
 
@@ -121,8 +228,7 @@
 
       state.captionPollInterval = setInterval(() => {
         if (!state.isActive || !state.config) return;
-        state.captionProcessRAF = null;
-        processCaptionBlocks();
+        runCaptionProcessor();
       }, 1500);
 
       const targetDesc = captionRoot === document.body ? 'body (fallback)' : 'contenedor de subtítulos';
@@ -135,20 +241,45 @@
       state.captionProcessRAF = null;
     }
 
-    function onNewCaption({ speaker, text }) {
-      if (!text || text.length < 4) return;
+    function onNewCaption({ speaker, text, block }) {
+      if (!text || text.length < 3) return;
+      if (isSystemMessage(text)) return;
 
       const isMe = isSelfSpeaker(speaker);
       const role = isMe ? 'me' : 'interviewer';
 
       const last = state.captionBuffer[state.captionBuffer.length - 1];
-      if (last && last.speaker === speaker) {
-        last.text = text;
+      
+      // Lógica de Mezcla Inteligente:
+      // 1. Si es el mismo bloque de DOM (Meet o Teams actualizando el mismo globo): Sobrescribir.
+      // 2. Si es un bloque diferente pero mismo orador y tiempo cercano: Anexar.
+      // 3. Si es orador diferente: Nueva línea.
+      
+      const isSameBlock = last && block && last.blockElement === block;
+      const isSameSpeaker = last && last.speaker === speaker;
+      const timeSinceLast = last ? Date.now() - last.timestamp : Infinity;
+
+      if (isSameSpeaker && (isSameBlock || timeSinceLast < 5000)) {
+        if (isSameBlock) {
+          last.text = text; // El bloque creció (Meet)
+        } else {
+          // Es un bloque nuevo de Teams del mismo orador, anexamos
+          if (!last.text.endsWith(text)) {
+            last.text = last.text.trim() + " " + text.trim();
+          }
+        }
         last.timestamp = Date.now();
-        modules.sessionLog.syncSessionTranscriptLast(speaker, role, text, last.id ?? null);
+        modules.sessionLog.syncSessionTranscriptLast(speaker, role, last.text, last.id ?? null);
       } else {
         const captionId = state.nextCaptionLineId++;
-        state.captionBuffer.push({ id: captionId, speaker, text, role, timestamp: Date.now() });
+        state.captionBuffer.push({ 
+          id: captionId, 
+          speaker, 
+          text, 
+          role, 
+          timestamp: Date.now(),
+          blockElement: block // Guardamos referencia para saber si el siguiente update es del mismo bloque
+        });
         if (state.captionBuffer.length > C.CAPTION_BUFFER_MAX) {
           state.captionBuffer.shift();
         }

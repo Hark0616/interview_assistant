@@ -37,6 +37,7 @@
     lastUserSpokeId: null,
     nextCaptionLineId: 1,
     condensedProfile: null,
+    condensedCompany: null,
     suggestionHistory: [],
     meetingSessionId: '',
     sessionTranscript: [],
@@ -71,6 +72,8 @@
   modules.captionCapture = window.__ia.createCaptionCapture(state, C, modules);
   modules.ai = window.__ia.createAiClient(state, C, modules);
   modules.ui = window.__ia.createOverlayUI(state, C, modules);
+  /** POC: registro de mensajes propios al chat de Meet (meetChatSelfLogPoc.js) */
+  modules.chatSelfLogPoc = window.__ia.createMeetChatSelfLogPoc(state, C, modules);
 
   // ══════════════════════════════════════
   //  CONFIGURACIÓN
@@ -84,9 +87,62 @@
 
   // ══════════════════════════════════════
   //  INICIALIZACIÓN
+  //  Meet: espera barra de reunión / subtítulos.
+  //  Teams: en sala de espera (lobby) aún no existen colgar, mic ni subtítulos; se usa URL v2 o fallback por tiempo.
   // ══════════════════════════════════════
+  function isTeamsWebHost() {
+    const h = location.hostname;
+    return h === 'teams.microsoft.com'
+      || h === 'teams.live.com'
+      || h === 'teams.cloud.microsoft'
+      || h.endsWith('.teams.microsoft.com')
+      || h.endsWith('.teams.cloud.microsoft');
+  }
+
+  /** true si parece la app web de Teams (v2, enlace de reunión, etc.) sin estar ya en llamada. */
+  function isTeamsWebSurface() {
+    if (!isTeamsWebHost()) return false;
+    const p = (location.pathname + location.hash + location.search).toLowerCase();
+    return p.includes('/v2')
+        || p.includes('meetup-join')
+        || p.includes('light-meetings')
+        || p.includes('pre-join')
+        || p.includes('prejoin');
+  }
+
   function init() {
-    const waitForMeet = setInterval(() => {
+    let iaBootstrapped = false;
+    let waitForPlatform = null;
+
+    function bootstrap() {
+      if (iaBootstrapped) return;
+      iaBootstrapped = true;
+      if (waitForPlatform) clearInterval(waitForPlatform);
+      waitForPlatform = null;
+      modules.chatSelfLogPoc.start();
+      loadConfig((cfg) => {
+        modules.ui.createOverlay();
+        const statusIdle = isTeamsWebSurface() && !document.querySelector('[data-tid="hangup-button"]');
+        modules.sessionLog.restoreSessionLog((restored) => {
+          if (restored) {
+            modules.ui.renderTranscript();
+            modules.ui.updateStatus('Sesión previa restaurada (reciente)', 'idle');
+            return;
+          }
+          if (cfg) {
+            if (statusIdle) {
+              modules.ui.updateStatus('Listo. Únete a la reunión, activa subtítulos y pulsa Activar.', 'idle');
+            } else {
+              modules.ui.updateStatus('Listo. Activa para comenzar.', 'idle');
+            }
+          } else {
+            modules.ui.updateStatus('Configura el asistente primero', 'error');
+          }
+        });
+      });
+    }
+
+    waitForPlatform = setInterval(() => {
       if (document.querySelector('[data-call-ended]') !== null ||
           document.querySelector('[data-meeting-title]') !== null ||
           document.querySelector('[data-allocation-index]') !== null ||
@@ -96,26 +152,24 @@
           document.querySelector('button[aria-label*="silenciar" i]') !== null ||
           document.querySelector('button[aria-label*="micrófono" i]') !== null ||
           document.querySelector('[jscontroller="kAPMuc"]') !== null ||
-          document.querySelector('.vNKgIf') !== null) {
-
-        clearInterval(waitForMeet);
-        loadConfig((cfg) => {
-          modules.ui.createOverlay();
-          modules.sessionLog.restoreSessionLog((restored) => {
-            if (restored) {
-              modules.ui.renderTranscript();
-              modules.ui.updateStatus('Sesión previa restaurada (reciente)', 'idle');
-              return;
-            }
-            if (cfg) {
-              modules.ui.updateStatus('Listo. Activa para comenzar.', 'idle');
-            } else {
-              modules.ui.updateStatus('Configura el asistente primero', 'error');
-            }
-          });
-        });
+          document.querySelector('.vNKgIf') !== null ||
+          document.querySelector('[data-tid="hangup-button"]') !== null ||
+          document.querySelector('[data-tid="microphone-button"]') !== null ||
+          document.querySelector('[data-tid="call-controls"]') !== null ||
+          document.querySelector('[data-tid="closed-captions-v2-items-renderer"]') !== null ||
+          (isTeamsWebSurface() && document.body)) {
+        bootstrap();
       }
     }, 1500);
+
+    // Teams: si la URL no coincide con heurística pero sigues en el host, forzar arranque (SPA lenta o URL atípica)
+    if (isTeamsWebHost()) {
+      setTimeout(() => {
+        if (!iaBootstrapped) {
+          bootstrap();
+        }
+      }, 10000);
+    }
 
     // Escuchar cambios de config desde el popup y comandos del panel pop-out
     chrome.runtime.onMessage.addListener((msg) => {
@@ -127,19 +181,42 @@
       if (msg.type === 'CONFIG_UPDATED') {
         const oldCv = state.config?.cvProfile || '';
         const oldJob = state.config?.jobDescription || '';
+        const oldCompany = state.config?.company || '';
         loadConfig((newCfg) => {
           const cvChanged = (newCfg?.cvProfile || '') !== oldCv;
           const jobChanged = (newCfg?.jobDescription || '') !== oldJob;
-          if ((cvChanged || jobChanged) && state.condensedProfile) {
-            state.condensedProfile = null;
-            if (state.isActive) {
-              modules.ai.generateCondensedProfile().then(() => {
-                modules.ui.updateStatus('Perfil re-condensado', 'active');
-              });
-            } else {
-              modules.ui.updateStatus('Config actualizada — perfil se re-condensará al activar', 'idle');
+          const companyChanged = (newCfg?.company || '') !== oldCompany;
+          let needsUpdateStatus = true;
+
+          if (cvChanged || jobChanged) {
+            if (state.condensedProfile) {
+              state.condensedProfile = null;
+              needsUpdateStatus = false;
+              if (state.isActive) {
+                modules.ai.generateCondensedProfile().then(() => {
+                  modules.ui.updateStatus('Perfil re-condensado', 'active');
+                });
+              } else {
+                modules.ui.updateStatus('Config actualizada — perfil se re-condensará al activar', 'idle');
+              }
             }
-          } else {
+          }
+
+          if (companyChanged) {
+            if (state.condensedCompany) {
+              state.condensedCompany = null;
+              needsUpdateStatus = false;
+              if (state.isActive) {
+                modules.ai.generateCondensedCompany().then(() => {
+                  modules.ui.updateStatus('Empresa re-condensada', 'active');
+                });
+              } else {
+                modules.ui.updateStatus('Config actualizada — empresa se re-condensará al activar', 'idle');
+              }
+            }
+          }
+
+          if (needsUpdateStatus) {
             modules.ui.updateStatus('Config actualizada', state.isActive ? 'active' : 'idle');
           }
         });
@@ -171,7 +248,10 @@
         watcherTimer = null;
         const captionRoot = document.querySelector('[aria-label="Subtítulos"]')
                          || document.querySelector('[aria-label="Captions"]')
-                         || document.querySelector('.vNKgIf');
+                         || document.querySelector('.vNKgIf')
+                         || document.querySelector('[data-tid="closed-caption-v2-virtual-list-content"]')
+                         || document.querySelector('.fui-ChatMessageCompact')
+                         || document.querySelector('[data-tid="closed-captions-v2-items-renderer"]');
         if (captionRoot && captionRoot !== lastCaptionRoot) {
           lastCaptionRoot = captionRoot;
           modules.captionCapture.startCaptionObserver();

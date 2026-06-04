@@ -320,6 +320,11 @@ body {
   background: rgba(99, 102, 241, 0.06);
 }
 
+.ia-panel-note-input.ia-note-relay-error {
+  border-color: rgba(239, 68, 68, 0.75);
+  background: rgba(239, 68, 68, 0.12);
+}
+
 /* ── Footer ── */
 .ia-panel-footer {
   display: flex;
