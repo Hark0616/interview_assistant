@@ -73,16 +73,19 @@
       }
 
       sections.push(`REGLAS:
-- SOLO lo que el candidato diría, sin etiquetas ni prefijos
-- Primera persona directa, máximo 3 puntos de 1-2 oraciones
-- Datos REALES del perfil.
-- IDIOMA: Responde SIEMPRE en el mismo idioma en el que habla/pregunta el entrevistador en el último tramo. Si te habla/pregunta en inglés, responde obligatoriamente en inglés. Si habla en español, en español. Traduce la información de tu perfil/CV o empresa al idioma correspondiente si es necesario.
-- El usuario puede enviar un bloque largo: todo lo dicho desde su última intervención; usa el hilo completo como contexto
-- Si aparece <<< RESPONDE A ESTO, prioriza eso (última intervención del entrevistador en el bloque); si no hay marca, infiere la pregunta principal del texto
-- Sé coherente con tus respuestas anteriores (turnos previos), no te repitas
-- NUNCA pidas aclaración ni hagas preguntas de vuelta; SIEMPRE da una respuesta directa aunque el contexto sea incompleto
-- La transcripción puede tener errores de reconocimiento de voz (palabras cortadas, repeticiones, ruido): IGNÓRALOS, infiere la intención real de la pregunta y responde
-- NUNCA menciones la transcripción, el sistema, la calidad del audio ni que eres un asistente; actúa como si fueras directamente el candidato pensando en voz alta`);
+- SOLO lo que el candidato diría, en primera persona directa, sin etiquetas, prefijos ni comentarios introductorios.
+- ADAPTA EL FORMATO DINÁMICAMENTE al tipo de pregunta:
+  * Pregunta conductual o de comportamiento ("Cuéntame cuando...", "Háblame de una situación...", "Cómo manejas..."): Estructura la respuesta usando el método STAR (Situación, Tarea, Acción, Resultado) de forma fluida, conversacional y en primera persona.
+  * Pregunta técnica o de arquitectura: Da una respuesta estructurada con bullets cortos, mencionando tecnologías exactas de tu perfil, patrones de diseño y buenas prácticas.
+  * Pregunta rápida o de calentamiento: Da una respuesta concisa y natural de 1 o 2 oraciones.
+- Datos REALES del perfil. NUNCA inventes tecnologías, certificaciones o proyectos que no estén explícitamente en tu perfil/CV.
+- IDIOMA: Responde SIEMPRE en el mismo idioma en el que habla/pregunta el entrevistador en el último tramo. Si te habla en inglés, responde obligatoriamente en inglés. Si habla en español, en español.
+- El usuario puede enviar un bloque largo: todo lo dicho desde su última intervención; usa el hilo completo como contexto.
+- Si aparece <<< RESPONDE A ESTO, prioriza eso (última intervención del entrevistador en el bloque); si no hay marca, infiere la pregunta principal del texto.
+- Sé coherente con tus respuestas anteriores (turnos previos), no te repitas.
+- NUNCA pidas aclaración ni hagas preguntas de vuelta; SIEMPRE da una respuesta directa aunque el contexto sea incompleto.
+- La transcripción puede tener errores de reconocimiento de voz (palabras cortadas, repeticiones, ruido): IGNÓRALOS, infiere la intención real de la pregunta y responde.
+- NUNCA menciones la transcripción, el sistema, la calidad del audio ni que eres un asistente; actúa como si fueras directamente el candidato pensando en voz alta.`);
 
       return sections.join('\n\n');
     }
@@ -90,7 +93,7 @@
     async function generateCondensedProfile() {
       const cvText = state.config?.cvProfile || '';
 
-      if (!state.config?.apiKey || !cvText || cvText.length < 600) {
+      if (!state.config?.apiKey || !cvText || cvText.length < 15000) {
         state.condensedProfile = cvText;
         return;
       }
@@ -106,7 +109,7 @@
           systemPrompt: 'Condensa información. Responde SOLO con el resumen.',
           messages: [{
             role: 'user',
-            content: `Condensa este CV en máximo 250 palabras. Mantén: skills técnicos clave, años de experiencia y logros cuantificables. Sin bullets.\n\n${cvText}`
+            content: `Condensa este CV en máximo 1200 palabras. Mantén todos los skills técnicos, tecnologías, herramientas, años de experiencia y logros cuantificables de cada rol. Sin bullets.\n\n${cvText}`
           }]
         }
       });
@@ -115,7 +118,7 @@
         state.condensedProfile = response.suggestion;
         modules.ui.updateStatus('Perfil condensado', 'active');
       } else {
-        state.condensedProfile = cvText.substring(0, 1500);
+        state.condensedProfile = cvText.substring(0, 15000);
         modules.ui.updateStatus('Perfil truncado (error al condensar)', 'active');
       }
     }
@@ -123,7 +126,7 @@
     async function generateCondensedCompany() {
       const companyText = state.config?.company || '';
 
-      if (!state.config?.apiKey || !companyText || companyText.length < 400) {
+      if (!state.config?.apiKey || !companyText || companyText.length < 8000) {
         state.condensedCompany = companyText;
         return;
       }
@@ -139,7 +142,7 @@
           systemPrompt: 'Condensa información. Responde SOLO con el resumen.',
           messages: [{
             role: 'user',
-            content: `Condensa esta descripción de empresa en máximo 100 palabras. Conserva industria, tipo de producto/servicio, cultura relevante para entrevista y datos diferenciales útiles para contextualizar respuestas.\n\n${companyText}`
+            content: `Condensa esta descripción de empresa en máximo 600 palabras. Conserva industria, tipo de producto/servicio, cultura relevante para entrevista y datos diferenciales útiles para contextualizar respuestas.\n\n${companyText}`
           }]
         }
       });
@@ -148,7 +151,7 @@
         state.condensedCompany = response.suggestion;
         modules.ui.updateStatus('Empresa condensada', 'active');
       } else {
-        state.condensedCompany = companyText.substring(0, 800);
+        state.condensedCompany = companyText.substring(0, 8000);
         modules.ui.updateStatus('Empresa truncada (error al condensar)', 'active');
       }
     }
@@ -240,6 +243,7 @@
 
       state.isLoading = true;
       modules.ui.setLoadingState(true);
+      modules.ui.displaySuggestion(''); // Limpiar sugerencia previa
 
       const { userPayload, latestQuestion } = buildConversationPayload(recentLines);
       modules.sessionLog.recordIaActivation(userPayload);
@@ -247,26 +251,67 @@
       const systemPrompt = buildSystemPrompt();
       const messages = buildMessages(systemPrompt, userPayload);
 
-      const response = await sendMessageAsync({
-        type: 'GET_AI_SUGGESTION',
-        data: {
-          provider: state.config.provider || 'gemini',
-          apiKey: state.config.apiKey,
-          model: state.config.model,
-          systemPrompt,
-          messages
-        }
-      });
+      let accumulatedSuggestion = '';
+      let isFirstChunk = true;
 
-      state.isLoading = false;
-      modules.ui.setLoadingState(false);
-      state.lastAiRequestCompletedAt = Date.now();
+      try {
+        const port = chrome.runtime.connect({ name: 'ai-stream' });
+        
+        port.postMessage({
+          type: 'GET_AI_SUGGESTION_STREAM',
+          data: {
+            provider: state.config.provider || 'gemini',
+            apiKey: state.config.apiKey,
+            model: state.config.model,
+            systemPrompt,
+            messages
+          }
+        });
 
-      if (response?.success) {
-        handleSuggestionSuccess(response, latestQuestion, recentLines);
-      } else {
-        modules.sessionLog.recordIaError(response?.error || 'desconocido');
-        modules.ui.displaySuggestion(`Error: ${response?.error || 'desconocido'}`, true);
+        port.onMessage.addListener((msg) => {
+          if (msg.type === 'chunk') {
+            if (isFirstChunk) {
+              isFirstChunk = false;
+              modules.ui.setLoadingState(false);
+            }
+            accumulatedSuggestion += msg.text;
+            modules.ui.displaySuggestion(accumulatedSuggestion);
+          } else if (msg.type === 'done') {
+            state.isLoading = false;
+            modules.ui.setLoadingState(false);
+            state.lastAiRequestCompletedAt = Date.now();
+            
+            handleSuggestionSuccess({ suggestion: accumulatedSuggestion, truncated: false }, latestQuestion, recentLines);
+            port.disconnect();
+          } else if (msg.type === 'error') {
+            state.isLoading = false;
+            modules.ui.setLoadingState(false);
+            state.lastAiRequestCompletedAt = Date.now();
+            
+            modules.sessionLog.recordIaError(msg.error || 'desconocido');
+            modules.ui.displaySuggestion(`Error en streaming: ${msg.error || 'desconocido'}`, true);
+            port.disconnect();
+          }
+        });
+
+        port.onDisconnect.addListener(() => {
+          if (state.isLoading) {
+            state.isLoading = false;
+            modules.ui.setLoadingState(false);
+            if (accumulatedSuggestion) {
+              handleSuggestionSuccess({ suggestion: accumulatedSuggestion, truncated: false }, latestQuestion, recentLines);
+            } else {
+              modules.ui.displaySuggestion('Error: Conexión con el fondo perdida', true);
+            }
+          }
+        });
+
+      } catch (err) {
+        state.isLoading = false;
+        modules.ui.setLoadingState(false);
+        state.lastAiRequestCompletedAt = Date.now();
+        modules.sessionLog.recordIaError(err.message);
+        modules.ui.displaySuggestion(`Error de puerto: ${err.message}`, true);
       }
     }
 

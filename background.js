@@ -51,6 +51,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 });
 
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name === 'ai-stream') {
+    port.onMessage.addListener((msg) => {
+      if (msg.type === 'GET_AI_SUGGESTION_STREAM') {
+        handleAISuggestionStream(msg.data, port);
+      }
+    });
+  }
+});
+
 // ── Providers ──
 
 function normalizeProviderError(provider, responseStatus, rawMessage) {
@@ -499,3 +509,151 @@ async function testApiKey(provider, apiKey, model) {
     throw new Error(normalizeProviderError(provider, response.status, rawMsg));
   }
 }
+
+function extractJsonObjectsFromBuffer(bufferStr) {
+  const objects = [];
+  let braceCount = 0;
+  let startIdx = -1;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < bufferStr.length; i++) {
+    const char = bufferStr[i];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+    } else {
+      if (char === '"') {
+        inString = true;
+      } else if (char === '{') {
+        if (braceCount === 0) {
+          startIdx = i;
+        }
+        braceCount++;
+      } else if (char === '}') {
+        braceCount--;
+        if (braceCount === 0 && startIdx !== -1) {
+          objects.push(bufferStr.slice(startIdx, i + 1));
+          startIdx = -1;
+        }
+      }
+    }
+  }
+
+  const remaining = startIdx !== -1 ? bufferStr.slice(startIdx) : '';
+  return { objects, remaining };
+}
+
+async function handleAISuggestionStream({ provider, apiKey, model, systemPrompt, messages }, port) {
+  const prov = PROVIDERS[provider] || PROVIDERS.gemini;
+
+  let url = prov.buildUrl(apiKey, model);
+  if (provider === 'gemini') {
+    url = url.replace(':generateContent', ':streamGenerateContent');
+  }
+
+  const headers = prov.buildHeaders(apiKey);
+  const body = prov.buildBody(systemPrompt, messages, model);
+
+  if (provider === 'groq' || provider === 'openrouter') {
+    body.stream = true;
+  }
+
+  if (DEBUG_PROMPT_LOGS) {
+    console.group('[IA DEBUG] Stream Request');
+    console.log('provider:', provider);
+    console.log('model:', model);
+    console.log('url:', url.split('?')[0]);
+    console.groupEnd();
+  }
+
+  try {
+    const response = await fetchWithRetry(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body)
+    });
+
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      const rawMsg = errData.error?.message || errData.message || '';
+      throw new Error(normalizeProviderError(provider, response.status, rawMsg));
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+
+      if (provider === 'gemini') {
+        const { objects, remaining } = extractJsonObjectsFromBuffer(buffer);
+        buffer = remaining;
+        for (const jsonStr of objects) {
+          try {
+            const parsed = JSON.parse(jsonStr);
+            const text = parsed.candidates?.[0]?.content?.parts?.[0]?.text || '';
+            if (text) {
+              port.postMessage({ type: 'chunk', text });
+            }
+          } catch (e) {
+            console.warn('[background] Error al parsear chunk de Gemini:', e);
+          }
+        }
+      } else {
+        let lines = buffer.split('\n');
+        buffer = lines.pop();
+        for (const line of lines) {
+          const cleaned = line.trim();
+          if (!cleaned) continue;
+          if (cleaned.startsWith('data: ')) {
+            const dataStr = cleaned.slice(6);
+            if (dataStr === '[DONE]') continue;
+            try {
+              const parsed = JSON.parse(dataStr);
+              const text = parsed.choices?.[0]?.delta?.content || '';
+              if (text) {
+                port.postMessage({ type: 'chunk', text });
+              }
+            } catch (e) {
+              console.warn('[background] Error al parsear SSE chunk:', e);
+            }
+          }
+        }
+      }
+    }
+
+    if (buffer && (provider === 'groq' || provider === 'openrouter')) {
+      const cleaned = buffer.trim();
+      if (cleaned.startsWith('data: ') && !cleaned.includes('[DONE]')) {
+        try {
+          const parsed = JSON.parse(cleaned.slice(6));
+          const text = parsed.choices?.[0]?.delta?.content || '';
+          if (text) {
+            port.postMessage({ type: 'chunk', text });
+          }
+        } catch (err) {
+          console.warn('[background] Error parsing residual SSE:', err);
+        }
+      }
+    }
+
+    port.postMessage({ type: 'done' });
+
+  } catch (err) {
+    console.error('[background] Error en stream:', err);
+    port.postMessage({ type: 'error', error: err.message });
+  }
+}
+
+

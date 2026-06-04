@@ -9,12 +9,29 @@ describe('aiClient.js', () => {
     // Mocks globales
     global.window = global;
     global.window.__ia = {};
+    
+    const mockPort = {
+      postMessage: vi.fn(),
+      onMessage: {
+        addListener: vi.fn((listener) => {
+          mockPort._messageListener = listener;
+        })
+      },
+      onDisconnect: {
+        addListener: vi.fn()
+      },
+      disconnect: vi.fn()
+    };
+
     global.chrome = {
       runtime: {
         sendMessage: vi.fn(),
+        connect: vi.fn(() => mockPort),
         lastError: null
       }
     };
+
+    global.mockPort = mockPort;
 
     // Estado inicial de prueba
     state = {
@@ -33,7 +50,8 @@ describe('aiClient.js', () => {
         findLastUserSpokeIndex: vi.fn(() => -1),
         buildSessionDigestForPrompt: vi.fn(() => ''),
         recordIaActivation: vi.fn(),
-        recordIaResponse: vi.fn()
+        recordIaResponse: vi.fn(),
+        recordIaError: vi.fn()
       },
       ui: {
         updateStatus: vi.fn(),
@@ -63,12 +81,17 @@ describe('aiClient.js', () => {
   it('debería manejar una respuesta exitosa de la IA', async () => {
     state.captionBuffer = [{ id: 1, role: 'interviewer', text: '¿Como estas?' }];
     
-    // Simular respuesta exitosa del background script
-    chrome.runtime.sendMessage.mockImplementation((payload, callback) => {
-      callback({ success: true, suggestion: 'Estoy bien' });
-    });
+    const requestPromise = aiClient.requestSuggestion();
 
-    await aiClient.requestSuggestion();
+    expect(chrome.runtime.connect).toHaveBeenCalled();
+    const port = global.mockPort;
+    
+    if (port._messageListener) {
+      port._messageListener({ type: 'chunk', text: 'Estoy bien' });
+      port._messageListener({ type: 'done' });
+    }
+
+    await requestPromise;
 
     expect(modules.ui.displaySuggestion).toHaveBeenCalledWith('Estoy bien');
     expect(state.suggestionHistory[0].answer).toBe('Estoy bien');
