@@ -7,6 +7,7 @@
   window.__ia = window.__ia || {};
 
   window.__ia.createAiClient = function (state, C, modules) {
+    let memoryUpdateInFlight = false;
 
     function findLastIndex(arr, predicate) {
       for (let i = arr.length - 1; i >= 0; i--) {
@@ -52,6 +53,18 @@
           resolve(response || { success: false, error: 'Respuesta vacía del background' });
         });
       });
+    }
+
+    function buildProviderOptions(overrides = {}) {
+      return {
+        meetingSessionId: state.meetingSessionId,
+        openRouterRouting: state.config?.openRouterRouting || 'latency',
+        reasoningEffort: state.config?.reasoningEffort || 'none',
+        modelMetadata: state.config?.modelMetadata || null,
+        temperature: 0.4,
+        maxCompletionTokens: 512,
+        ...overrides
+      };
     }
 
     function buildSystemPrompt() {
@@ -142,6 +155,7 @@
           provider: state.config.provider || 'gemini',
           apiKey: state.config.apiKey,
           model: state.config.model,
+          ...buildProviderOptions({ maxCompletionTokens: 1200, temperature: 0.2 }),
           systemPrompt: 'Condensa información. Responde SOLO con el resumen.',
           messages: [{
             role: 'user',
@@ -151,6 +165,7 @@
       });
 
       if (response?.success && response.suggestion) {
+        modules.sessionLog.recordApiUsage(response.usage, 'profile-summary');
         state.condensedProfile = response.suggestion;
         modules.ui.updateStatus('Perfil condensado', 'active');
       } else {
@@ -175,6 +190,7 @@
           provider: state.config.provider || 'gemini',
           apiKey: state.config.apiKey,
           model: state.config.model,
+          ...buildProviderOptions({ maxCompletionTokens: 800, temperature: 0.2 }),
           systemPrompt: 'Condensa información. Responde SOLO con el resumen.',
           messages: [{
             role: 'user',
@@ -184,6 +200,7 @@
       });
 
       if (response?.success && response.suggestion) {
+        modules.sessionLog.recordApiUsage(response.usage, 'company-summary');
         state.condensedCompany = response.suggestion;
         modules.ui.updateStatus('Empresa condensada', 'active');
       } else {
@@ -218,7 +235,7 @@
         .join(' ')
         .trim();
 
-      const digest = modules.sessionLog.buildSessionDigestForPrompt();
+      const digest = modules.sessionLog.buildSessionDigestForPrompt(latestQuestion || conversationText);
       const userPayload = digest
         ? `[Registro previo de la reunión (contexto; no lo repitas literalmente).\n${digest}]\n\n--- Mensaje actual (tramo desde tu última intervención) ---\n\n${conversationText}`
         : conversationText;
@@ -227,13 +244,54 @@
     }
 
     function buildMessages(systemPrompt, userPayload) {
-      const messages = [];
-      for (const h of state.suggestionHistory.slice(-3)) {
-        messages.push({ role: 'user', content: h.question });
-        messages.push({ role: 'assistant', content: h.answer });
+      void systemPrompt;
+      return [{ role: 'user', content: userPayload }];
+    }
+
+    async function maybeUpdateStructuredMemory() {
+      if (memoryUpdateInFlight || !state.config?.apiKey) return;
+      const pending = modules.sessionLog.getPendingMemoryUpdate();
+      if (!pending) return;
+
+      memoryUpdateInFlight = true;
+      try {
+        const previous = pending.previousMemory || '(todavía no existe memoria consolidada)';
+        const response = await sendMessageAsync({
+          type: 'GET_AI_SUGGESTION',
+          data: {
+            provider: state.config.provider || 'gemini',
+            apiKey: state.config.apiKey,
+            model: state.config.model,
+            ...buildProviderOptions({ maxCompletionTokens: 1200, temperature: 0.2 }),
+            systemPrompt:
+              'Mantén memoria factual y compacta de una entrevista. No inventes. ' +
+              'Responde solo con la memoria actualizada, sin introducción.',
+            messages: [{
+              role: 'user',
+              content: `Actualiza la memoria acumulada usando únicamente el bloque nuevo.\n\n` +
+                `Usa estas secciones fijas:\n` +
+                `TEMAS Y PREGUNTAS CUBIERTOS\nHISTORIAS STAR UTILIZADAS\n` +
+                `TECNOLOGÍAS, MÉTRICAS Y EXPERIENCIAS MENCIONADAS\n` +
+                `AFIRMACIONES Y COMPROMISOS DEL CANDIDATO\nFORTALEZAS Y VACÍOS\n` +
+                `PREGUNTAS O FOLLOW-UPS PENDIENTES\nIDIOMA, TONO Y ESTILO\n\n` +
+                `MEMORIA ANTERIOR:\n${previous}\n\n` +
+                `TRANSCRIPCIÓN NUEVA:\n${pending.transcript}\n\n` +
+                `RESPUESTAS SUGERIDAS RECIENTES:\n${pending.recentResponses.join('\n---\n') || '(ninguna)'}`
+            }]
+          }
+        });
+
+        if (response?.success && response.suggestion) {
+          modules.sessionLog.recordApiUsage(response.usage, 'memory-summary');
+          modules.sessionLog.applyStructuredMemory(response.suggestion, pending.lastCaptionId);
+        } else if (response?.error) {
+          modules.sessionLog.recordIaError(`No se pudo actualizar memoria: ${response.error}`);
+        }
+      } catch (err) {
+        modules.sessionLog.recordIaError(`No se pudo actualizar memoria: ${err.message}`);
+      } finally {
+        memoryUpdateInFlight = false;
       }
-      messages.push({ role: 'user', content: userPayload });
-      return messages;
     }
 
     function handleSuggestionSuccess(response, latestQuestion, recentLines) {
@@ -246,6 +304,7 @@
         ? response.suggestion + '\n⚠️ (respuesta cortada por límite de tokens — pulsa Regenerar)'
         : response.suggestion;
 
+      modules.sessionLog.recordApiUsage(response.usage, 'suggestion');
       modules.sessionLog.recordIaResponse(suggestionText);
 
       const historyQuestion =
@@ -261,6 +320,7 @@
       }
 
       modules.ui.displaySuggestion(suggestionText);
+      void maybeUpdateStructuredMemory();
     }
 
     function finishCurrentRequest(port) {
@@ -346,6 +406,7 @@
             provider: state.config.provider || 'gemini',
             apiKey: state.config.apiKey,
             model: state.config.model,
+            ...buildProviderOptions({ maxCompletionTokens: 512, temperature: 0.4 }),
             systemPrompt,
             messages
           }
@@ -363,7 +424,11 @@
             if (!finishCurrentRequest(port)) return;
             if (accumulatedSuggestion) {
               handleSuggestionSuccess(
-                { suggestion: accumulatedSuggestion, truncated: !!msg.truncated },
+                {
+                  suggestion: accumulatedSuggestion,
+                  truncated: !!msg.truncated,
+                  usage: msg.usage || null
+                },
                 latestQuestion,
                 recentLines
               );
@@ -376,7 +441,13 @@
           } else if (msg.type === 'error') {
             if (!finishCurrentRequest(port)) return;
             modules.sessionLog.recordIaError(msg.error || 'desconocido');
-            modules.ui.displaySuggestion(`Error en streaming: ${msg.error || 'desconocido'}`, true);
+            if (accumulatedSuggestion) {
+              modules.ui.displaySuggestion(
+                `${accumulatedSuggestion}\n⚠ Respuesta parcial: ${msg.error || 'error de streaming'}`
+              );
+            } else {
+              modules.ui.displaySuggestion(`Error en streaming: ${msg.error || 'desconocido'}`, true);
+            }
             port.disconnect();
             schedulePendingRequest();
           }

@@ -258,7 +258,7 @@
       <select id="provider">
         <option value="gemini">Google Gemini (gratis, recomendado)</option>
         <option value="groq">Groq (gratis con registro)</option>
-        <option value="openrouter">OpenRouter (modelos :free)</option>
+        <option value="openrouter">OpenRouter</option>
       </select>
     </div>
 
@@ -287,6 +287,25 @@
         </label>
       </div>
       <div class="hint" id="model-hint">Carga la lista real con el botón Actualizar (requiere API key del proveedor seleccionado).</div>
+    </div>
+
+    <div class="form-group" id="openrouter-routing-row" style="display:none">
+      <label>Enrutamiento OpenRouter</label>
+      <select id="openRouterRouting">
+        <option value="latency">Más rápido (recomendado para entrevistas)</option>
+        <option value="balanced">Balanceado por OpenRouter</option>
+        <option value="price">Más barato</option>
+      </select>
+      <div class="hint">Mantiene fallbacks activos y prioriza latencia, balance o precio entre proveedores.</div>
+    </div>
+
+    <div class="form-group" id="openrouter-reasoning-row" style="display:none">
+      <label>Razonamiento</label>
+      <select id="reasoningEffort">
+        <option value="none">Desactivado (respuesta inmediata)</option>
+        <option value="low">Bajo (preguntas técnicas complejas)</option>
+        <option value="medium">Medio (más lento y costoso)</option>
+      </select>
     </div>
 
     <div class="form-group">

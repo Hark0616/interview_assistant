@@ -8,6 +8,25 @@
 
   window.__ia.createSessionLog = function (state, C, _modules) {
 
+    function emptyUsage() {
+      return {
+        requests: 0,
+        promptTokens: 0,
+        completionTokens: 0,
+        reasoningTokens: 0,
+        cachedTokens: 0,
+        cacheWriteTokens: 0,
+        cost: 0
+      };
+    }
+
+    function ensureUsage() {
+      if (!state.sessionUsage || typeof state.sessionUsage !== 'object') {
+        state.sessionUsage = emptyUsage();
+      }
+      return state.sessionUsage;
+    }
+
     function getMeetingCodeFromUrl() {
       const meetMatch = window.location.pathname.match(/\/([a-z]{3}-[a-z]{4}-[a-z]{3})/i);
       if (meetMatch) return meetMatch[1];
@@ -39,8 +58,13 @@
         meetingCode: getMeetingCodeFromUrl(),
         meetingUrl: window.location.href,
         updatedAt: Date.now(),
-        transcript: state.sessionTranscript.slice(-800),
-        aiEvents: state.sessionAiEvents.slice(-60)
+        transcript: state.sessionTranscript.slice(-C.SESSION_TRANSCRIPT_MAX_LINES),
+        aiEvents: state.sessionAiEvents.slice(-C.SESSION_AI_EVENTS_MAX),
+        memory: state.sessionMemory || '',
+        memoryProcessedCaptionId: state.sessionMemoryProcessedCaptionId ?? null,
+        memoryUpdatedAt: state.sessionMemoryUpdatedAt || 0,
+        questionsSinceMemoryUpdate: state.sessionQuestionsSinceMemoryUpdate || 0,
+        usage: ensureUsage()
       };
       try {
         chrome.storage.local.set({ [C.STORAGE_KEY_MEETING_LOG]: payload }, () => {
@@ -76,6 +100,12 @@
       state.meetingSessionId = `${getMeetingCodeFromUrl()}-${Date.now()}`;
       state.sessionTranscript = [];
       state.sessionAiEvents = [];
+      state.sessionMemory = '';
+      state.sessionMemoryProcessedCaptionId = null;
+      state.sessionMemoryUpdatedAt = Date.now();
+      state.sessionQuestionsSinceMemoryUpdate = 0;
+      state.sessionUsage = emptyUsage();
+      state.sessionWasRestored = false;
       state.captionBuffer = [];
       state.lastUserSpokeId = null;
       state.lastAiContextCaptionId = null;
@@ -83,6 +113,12 @@
       if (state.persistSessionTimer) clearTimeout(state.persistSessionTimer);
       state.persistSessionTimer = null;
       flushPersistSessionLog();
+    }
+
+    function ensureSessionLog() {
+      if (state.meetingSessionId) return false;
+      resetSessionLog();
+      return true;
     }
 
     function restoreSessionLog(callback) {
@@ -94,9 +130,19 @@
           return callback?.(false);
         }
 
-        state.sessionTranscript = Array.isArray(data.transcript) ? data.transcript.slice(-800) : [];
-        state.sessionAiEvents = Array.isArray(data.aiEvents) ? data.aiEvents.slice(-60) : [];
+        state.sessionTranscript = Array.isArray(data.transcript)
+          ? data.transcript.slice(-C.SESSION_TRANSCRIPT_MAX_LINES)
+          : [];
+        state.sessionAiEvents = Array.isArray(data.aiEvents)
+          ? data.aiEvents.slice(-C.SESSION_AI_EVENTS_MAX)
+          : [];
         state.meetingSessionId = data.meetingSessionId || `${getMeetingCodeFromUrl()}-${Date.now()}`;
+        state.sessionMemory = String(data.memory || '').slice(0, C.SESSION_MEMORY_MAX_CHARS);
+        state.sessionMemoryProcessedCaptionId = data.memoryProcessedCaptionId ?? null;
+        state.sessionMemoryUpdatedAt = Number(data.memoryUpdatedAt) || Number(data.updatedAt) || Date.now();
+        state.sessionQuestionsSinceMemoryUpdate = Number(data.questionsSinceMemoryUpdate) || 0;
+        state.sessionUsage = { ...emptyUsage(), ...(data.usage || {}) };
+        state.sessionWasRestored = true;
 
         const recentTranscript = state.sessionTranscript.slice(-C.CAPTION_BUFFER_MAX);
         state.captionBuffer = recentTranscript.map((row, idx) => ({
@@ -141,32 +187,109 @@
       return state.sessionTranscript.slice(0, transcriptIdx + 1);
     }
 
-    function buildSessionDigestForPrompt() {
+    function tokenizeForRetrieval(text) {
+      const stopWords = new Set([
+        'para', 'como', 'pero', 'porque', 'esta', 'este', 'esto', 'desde', 'sobre', 'entre',
+        'that', 'this', 'with', 'from', 'have', 'what', 'when', 'where', 'your', 'about'
+      ]);
+      return new Set(String(text || '')
+        .toLocaleLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .split(/[^a-z0-9+#.]+/)
+        .filter((token) => token.length >= 4 && !stopWords.has(token)));
+    }
+
+    function findRelevantTranscriptFragments(queryText, excludedCaptionIds) {
+      const terms = tokenizeForRetrieval(queryText);
+      if (terms.size === 0) return [];
+      return state.sessionTranscript
+        .filter((row) => !excludedCaptionIds.has(row.captionId))
+        .map((row) => {
+          const rowTerms = tokenizeForRetrieval(row.text);
+          let score = 0;
+          for (const term of terms) {
+            if (rowTerms.has(term)) score += 1;
+          }
+          return { row, score };
+        })
+        .filter((item) => item.score > 0)
+        .sort((a, b) => b.score - a.score || b.row.t - a.row.t)
+        .slice(0, 4)
+        .sort((a, b) => a.row.t - b.row.t)
+        .map((item) => item.row);
+    }
+
+    function buildSessionDigestForPrompt(queryText = '') {
       const prior = getPriorSessionLinesForDigest();
-      if (prior.length === 0 && state.sessionAiEvents.length === 0) return '';
-
-      let transcriptPart = formatTranscriptLines(prior);
-      const budget = Math.floor(C.SESSION_DIGEST_MAX_CHARS * 0.72);
-      if (transcriptPart.length > budget) {
-        transcriptPart = '…(recorte del inicio de la reunión)…\n' + transcriptPart.slice(-budget);
+      const memory = String(state.sessionMemory || '').trim();
+      const recentRows = prior.slice(-C.SESSION_RECENT_MAX_LINES);
+      const recentIds = new Set(recentRows.map((row) => row.captionId));
+      const relevantRows = findRelevantTranscriptFragments(queryText, recentIds);
+      let recentText = formatTranscriptLines(recentRows);
+      if (recentText.length > C.SESSION_RECENT_MAX_CHARS) {
+        recentText = '…(ventana reciente recortada)…\n' +
+          recentText.slice(-C.SESSION_RECENT_MAX_CHARS);
       }
 
-      const activations = state.sessionAiEvents.filter((e) => e.kind === 'activation').length;
-      const header = activations > 0
-        ? `Consultas IA previas en esta sesión: ${activations}\n\n`
-        : '';
+      const responses = state.sessionAiEvents
+        .filter((event) => event.kind === 'response')
+        .slice(-2)
+        .map((event) => event.text.slice(0, 450));
 
-      const responses = state.sessionAiEvents.filter((e) => e.kind === 'response').slice(-2);
-      let aiPart = '';
+      const sections = [];
+      if (memory) sections.push(`MEMORIA CONSOLIDADA DE LA ENTREVISTA:\n${memory}`);
+      if (relevantRows.length) {
+        sections.push(`FRAGMENTOS ANTERIORES RELEVANTES:\n${formatTranscriptLines(relevantRows)}`);
+      }
+      if (recentText) sections.push(`VENTANA RECIENTE LITERAL:\n${recentText}`);
       if (responses.length) {
-        aiPart =
-          '\n\nÚltimas sugerencias IA (no las repitas; solo coherencia):\n' +
-          responses.map((r) => r.text.slice(0, 500)).join('\n---\n');
+        sections.push(
+          'ÚLTIMAS RESPUESTAS SUGERIDAS (solo para coherencia; no repetir literalmente):\n' +
+          responses.join('\n---\n')
+        );
       }
 
-      const combined = header + transcriptPart + aiPart;
+      const combined = sections.join('\n\n');
       if (combined.length <= C.SESSION_DIGEST_MAX_CHARS) return combined;
-      return combined.slice(-C.SESSION_DIGEST_MAX_CHARS);
+      return combined.slice(0, C.SESSION_DIGEST_MAX_CHARS);
+    }
+
+    function getPendingMemoryUpdate() {
+      const questionThreshold = state.sessionQuestionsSinceMemoryUpdate >= C.SESSION_MEMORY_UPDATE_QUESTIONS;
+      const age = Date.now() - (state.sessionMemoryUpdatedAt || 0);
+      const timeThreshold = age >= C.SESSION_MEMORY_UPDATE_INTERVAL_MS;
+      if (!questionThreshold && !timeThreshold) return null;
+
+      const processedId = Number(state.sessionMemoryProcessedCaptionId) || 0;
+      const rows = state.sessionTranscript.filter(
+        (row) => (Number(row.captionId) || 0) > processedId
+      );
+      if (rows.length === 0) return null;
+
+      const lastCaptionId = rows.reduce(
+        (max, row) => Math.max(max, Number(row.captionId) || 0),
+        processedId
+      );
+      const recentResponses = state.sessionAiEvents
+        .filter((event) => event.kind === 'response' && event.t > (state.sessionMemoryUpdatedAt || 0))
+        .slice(-C.SESSION_MEMORY_UPDATE_QUESTIONS)
+        .map((event) => event.text.slice(0, 1200));
+
+      return {
+        previousMemory: String(state.sessionMemory || ''),
+        transcript: formatTranscriptLines(rows).slice(-C.SESSION_RECENT_MAX_CHARS * 2),
+        recentResponses,
+        lastCaptionId
+      };
+    }
+
+    function applyStructuredMemory(memory, lastCaptionId) {
+      state.sessionMemory = String(memory || '').slice(0, C.SESSION_MEMORY_MAX_CHARS);
+      state.sessionMemoryProcessedCaptionId = lastCaptionId ?? state.sessionMemoryProcessedCaptionId;
+      state.sessionMemoryUpdatedAt = Date.now();
+      state.sessionQuestionsSinceMemoryUpdate = 0;
+      flushPersistSessionLog();
     }
 
     function recordIaActivation(promptText) {
@@ -186,7 +309,40 @@
         text: String(text).slice(0, C.SESSION_PROMPT_STORE_MAX)
       });
       if (state.sessionAiEvents.length > C.SESSION_AI_EVENTS_MAX) state.sessionAiEvents.shift();
+      state.sessionQuestionsSinceMemoryUpdate = (state.sessionQuestionsSinceMemoryUpdate || 0) + 1;
       flushPersistSessionLog();
+    }
+
+    function recordApiUsage(usage, purpose = 'suggestion') {
+      if (!usage || typeof usage !== 'object') return;
+      const totals = ensureUsage();
+      const add = (key) => {
+        const amount = Number(usage[key]);
+        if (Number.isFinite(amount) && amount >= 0) totals[key] += amount;
+      };
+      totals.requests += 1;
+      add('promptTokens');
+      add('completionTokens');
+      add('reasoningTokens');
+      add('cachedTokens');
+      add('cacheWriteTokens');
+      add('cost');
+      state.sessionAiEvents.push({
+        t: Date.now(),
+        kind: 'usage',
+        purpose,
+        usage: { ...usage }
+      });
+      if (state.sessionAiEvents.length > C.SESSION_AI_EVENTS_MAX) state.sessionAiEvents.shift();
+      flushPersistSessionLog();
+      _modules.ui?.updateUsage?.();
+    }
+
+    function formatUsageSummary() {
+      const usage = ensureUsage();
+      const compact = (value) => Number(value || 0).toLocaleString('es-CO');
+      return `${usage.requests} req · ${compact(usage.promptTokens)} in · ` +
+        `${compact(usage.completionTokens)} out · $${Number(usage.cost || 0).toFixed(4)}`;
     }
 
     function recordIaError(msg) {
@@ -207,6 +363,9 @@
         `Reunión: ${getMeetingCodeFromUrl()}`,
         `URL: ${window.location.href}`,
         `Generado: ${iso(Date.now())}`,
+        `Uso: ${formatUsageSummary()}`,
+        `Tokens de razonamiento: ${ensureUsage().reasoningTokens}`,
+        `Tokens cacheados: ${ensureUsage().cachedTokens}`,
         '',
         '--- Transcripción (subtítulos capturados en esta activación) ---',
         ''
@@ -214,6 +373,9 @@
       for (const l of state.sessionTranscript) {
         const role = l.role === 'me' ? 'TÚ' : 'ENTREVISTADOR';
         lines.push(`[${iso(l.t)}] [${role}] ${l.speaker || '?'}: ${l.text}`);
+      }
+      if (state.sessionMemory) {
+        lines.push('', '--- Memoria consolidada de la entrevista ---', '', state.sessionMemory);
       }
       lines.push('', '--- Eventos IA ---', '');
       for (const e of state.sessionAiEvents) {
@@ -225,6 +387,13 @@
           lines.push(`[${iso(e.t)}] --- Sugerencia IA ---`);
           lines.push(e.text || '');
           lines.push('');
+        } else if (e.kind === 'usage') {
+          const usage = e.usage || {};
+          lines.push(
+            `[${iso(e.t)}] USO ${e.purpose || 'request'}: ` +
+            `${usage.promptTokens || 0} in, ${usage.completionTokens || 0} out, ` +
+            `${usage.cachedTokens || 0} cache, $${Number(usage.cost || 0).toFixed(6)}`
+          );
         } else {
           lines.push(`[${iso(e.t)}] ERROR: ${e.text || ''}`);
           lines.push('');
@@ -252,12 +421,17 @@
       pushSessionTranscriptLine,
       syncSessionTranscriptLast,
       resetSessionLog,
+      ensureSessionLog,
       restoreSessionLog,
       flushPersistSessionLog,
       findLastUserSpokeIndex,
       buildSessionDigestForPrompt,
+      getPendingMemoryUpdate,
+      applyStructuredMemory,
       recordIaActivation,
       recordIaResponse,
+      recordApiUsage,
+      formatUsageSummary,
       recordIaError,
       downloadSessionLogFile
     };

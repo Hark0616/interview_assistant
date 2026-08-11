@@ -3,7 +3,7 @@
 Asistente de entrevistas en tiempo real para **Google Meet** y **Microsoft Teams** (en el navegador).
 Lee los subtítulos en directo, identifica quién habla, y genera sugerencias de respuesta con IA.
 
-Soporta **Gemini** (gratis), **Groq** (gratis) y **OpenRouter** (modelos gratuitos disponibles).
+Soporta **Gemini**, **Groq** y el catálogo completo de **OpenRouter**.
 
 ---
 
@@ -15,7 +15,7 @@ Soporta **Gemini** (gratis), **Groq** (gratis) y **OpenRouter** (modelos gratuit
 |-----------|-------|--------------|
 | **Google Gemini** (recomendado) | Gratis, 1500 req/día | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) → Get API Key |
 | **Groq** | Gratis, 30 req/min | [console.groq.com](https://console.groq.com) → API Keys → Create |
-| **OpenRouter** | Modelos :free gratis | [openrouter.ai/keys](https://openrouter.ai/keys) → Create Key |
+| **OpenRouter** | Modelos gratuitos y de pago | [openrouter.ai/keys](https://openrouter.ai/keys) → Create Key |
 
 ### 2. Instalar en Chrome
 1. Abre `chrome://extensions/`
@@ -29,6 +29,8 @@ Soporta **Gemini** (gratis), **Groq** (gratis) y **OpenRouter** (modelos gratuit
 3. **Perfil**: pega tu CV resumido o puntos relevantes
 4. **Puesto**: descripción del trabajo y empresa
 5. **Guardar configuración**
+
+Con OpenRouter también puedes elegir el routing: **Más rápido** para entrevistas, **Balanceado** o **Más barato**. El modo de razonamiento queda desactivado por defecto para reducir latencia y puede activarse en nivel bajo o medio.
 
 ---
 
@@ -84,6 +86,9 @@ Si quieres una copia de las claves en un **archivo en tu disco** (o varios PCs v
 - Todo lo que digan **los entrevistadores** se marca como contexto para generar respuestas
 - Lo que **tú dices** se registra para que la IA tenga contexto completo, pero NO genera sugerencia cuando hablas tú
 - Las sugerencias son en **primera persona** para que puedas usarlas directamente
+- La transcripción completa se conserva localmente; cada petición envía una memoria estructurada, una ventana reciente y hasta cuatro fragmentos anteriores relevantes.
+- Cada cinco respuestas o diez minutos se actualiza la memoria consolidada, manteniendo estable el tamaño del prompt en entrevistas largas.
+- Con OpenRouter, el pie del overlay muestra requests, tokens y costo real acumulado de la sesión.
 
 ---
 
@@ -117,7 +122,9 @@ En el popup, el botón **Actualizar** carga los IDs reales que devuelve cada pro
 | Gemini | gemini-pro-latest | Alias → último Pro |
 | Gemini | gemini-2.5-flash / gemini-2.5-flash-lite | Estables (según tu proyecto) |
 | Groq | llama-3.1-8b-instant, llama-3.3-70b-versatile, qwen/qwen3-32b, … | Actualizar (filtra Whisper/Orpheus/guard) |
-| OpenRouter | modelos `:free` o catálogo API | Filtrar «solo sin coste» en el popup |
+| OpenRouter | `anthropic/claude-sonnet-5` | Mejor opción general y para backend |
+| OpenRouter | `openai/gpt-5.6-terra` | Razonamiento técnico/industrial; mayor latencia |
+| OpenRouter | `anthropic/claude-haiku-4.5` | Máxima velocidad en tiempo real |
 
 ---
 

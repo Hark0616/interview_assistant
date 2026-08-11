@@ -343,11 +343,24 @@ body {
   gap: 6px;
 }
 
+.ia-panel-footer-info {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .ia-panel-status-text {
   font-size: 11px;
   color: var(--ia-text-muted);
   min-width: 0;
-  flex: 1;
+}
+
+.ia-panel-usage-text {
+  color: rgba(148, 163, 184, 0.78);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
 }
 
 #ia-panel-download-log {

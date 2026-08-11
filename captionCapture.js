@@ -8,6 +8,26 @@
 
   window.__ia.createCaptionCapture = function (state, C, modules) {
 
+    function normalizeQuestionFingerprint(text) {
+      return String(text || '')
+        .toLocaleLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim();
+    }
+
+    function likelyCompleteQuestion(text) {
+      const clean = String(text || '').trim();
+      if (!clean) return false;
+      if (/[?¿]/.test(clean)) return true;
+      const words = clean.split(/\s+/).filter(Boolean);
+      if (words.length >= 18) return true;
+      if (words.length >= 7 && /[.!:]$/.test(clean)) return true;
+      return /^(cu[eé]ntame|describe|explica|c[oó]mo|por qu[eé]|qu[eé]|cu[aá]l|when|why|how|what|tell me|describe|explain)\b/i.test(clean)
+        && words.length >= 8;
+    }
+
     const SELF_SPEAKER_NAMES = ['tú', 'you', 'yo', 'ich', 'je', 'tu'];
 
     // Mensajes de sistema de Teams/Meet que no son diálogo real.
@@ -295,7 +315,17 @@
 
       if (!isMe && !state.manualModeActive) {
         clearTimeout(state.debounceTimer);
-        const debounceMs = state.config?.debounceMs ?? 1800;
+        const configuredDebounce = state.config?.debounceMs;
+        const baseDebounceMs = configuredDebounce ?? 2800;
+        const currentQuestionText = state.captionBuffer
+          .filter((c, i) => c.role === 'interviewer' && i > modules.sessionLog.findLastUserSpokeIndex())
+          .map((c) => c.text)
+          .join(' ');
+        const debounceMs = configuredDebounce === 0
+          ? 0
+          : likelyCompleteQuestion(currentQuestionText)
+            ? baseDebounceMs
+            : Math.max(baseDebounceMs, 3800);
         state.debounceTimer = setTimeout(() => {
           const latestUserIdx = modules.sessionLog.findLastUserSpokeIndex();
           const newInterviewerLines = state.captionBuffer
@@ -303,8 +333,15 @@
           if (newInterviewerLines.length === 0) return;
 
           const newText = newInterviewerLines.map(c => c.text).join(' ');
-          if (newText && newText !== state.lastSentText && newText.length > 10) {
+          const fingerprint = normalizeQuestionFingerprint(newText);
+          if (
+            newText &&
+            newText !== state.lastSentText &&
+            fingerprint !== state.lastSentFingerprint &&
+            newText.length > 10
+          ) {
             state.lastSentText = newText;
+            state.lastSentFingerprint = fingerprint;
             modules.ai.requestSuggestion();
           }
         }, debounceMs);

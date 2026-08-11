@@ -4,7 +4,11 @@
 
 importScripts('panelManager.js');
 const DEBUG_PROMPT_LOGS = true;
-const AI_REQUEST_TIMEOUT_MS = 30000;
+const AI_REQUEST_TIMEOUT_MS = 60000;
+const AI_STREAM_FIRST_TOKEN_TIMEOUT_MS = 20000;
+const AI_STREAM_INACTIVITY_TIMEOUT_MS = 15000;
+const AI_STREAM_TOTAL_TIMEOUT_MS = 90000;
+const DEFAULT_MAX_COMPLETION_TOKENS = 512;
 
 // Atajo global (configurable en chrome://extensions/shortcuts) → pestaña Meet activa
 chrome.commands.onCommand.addListener((command) => {
@@ -19,7 +23,12 @@ chrome.commands.onCommand.addListener((command) => {
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.type === 'GET_AI_SUGGESTION') {
     handleAISuggestion(request.data)
-      .then(result => sendResponse({ success: true, suggestion: result.text, truncated: result.truncated }))
+      .then(result => sendResponse({
+        success: true,
+        suggestion: result.text,
+        truncated: result.truncated,
+        usage: result.usage
+      }))
       .catch(err => sendResponse({ success: false, error: err.message }));
     return true;
   }
@@ -57,9 +66,16 @@ chrome.runtime.onConnect.addListener((port) => {
 
   let activeRequest = null;
 
+  function clearRequestTimers(requestRef) {
+    if (!requestRef) return;
+    clearTimeout(requestRef.firstTokenTimeoutId);
+    clearTimeout(requestRef.inactivityTimeoutId);
+    clearTimeout(requestRef.totalTimeoutId);
+  }
+
   function cancelActiveRequest(reason = 'Solicitud cancelada.') {
     if (!activeRequest) return;
-    clearTimeout(activeRequest.timeoutId);
+    clearRequestTimers(activeRequest);
     activeRequest.controller.abort(new Error(reason));
     activeRequest = null;
   }
@@ -76,14 +92,38 @@ chrome.runtime.onConnect.addListener((port) => {
     const controller = new globalThis.AbortController();
     const requestRef = {
       controller,
-      timeoutId: setTimeout(() => {
-        controller.abort(new Error(`La IA tardó más de ${AI_REQUEST_TIMEOUT_MS / 1000} segundos.`));
-      }, AI_REQUEST_TIMEOUT_MS)
+      firstTokenReceived: false,
+      firstTokenTimeoutId: null,
+      inactivityTimeoutId: null,
+      totalTimeoutId: null,
+      markActivity(hasContent = false) {
+        if (hasContent && !this.firstTokenReceived) {
+          this.firstTokenReceived = true;
+          clearTimeout(this.firstTokenTimeoutId);
+          this.firstTokenTimeoutId = null;
+        }
+        clearTimeout(this.inactivityTimeoutId);
+        this.inactivityTimeoutId = setTimeout(() => {
+          controller.abort(new Error(
+            `La IA no envió datos durante ${AI_STREAM_INACTIVITY_TIMEOUT_MS / 1000} segundos.`
+          ));
+        }, AI_STREAM_INACTIVITY_TIMEOUT_MS);
+      }
     };
+    requestRef.firstTokenTimeoutId = setTimeout(() => {
+      controller.abort(new Error(
+        `La IA no comenzó a responder en ${AI_STREAM_FIRST_TOKEN_TIMEOUT_MS / 1000} segundos.`
+      ));
+    }, AI_STREAM_FIRST_TOKEN_TIMEOUT_MS);
+    requestRef.totalTimeoutId = setTimeout(() => {
+      controller.abort(new Error(
+        `La respuesta superó el límite total de ${AI_STREAM_TOTAL_TIMEOUT_MS / 1000} segundos.`
+      ));
+    }, AI_STREAM_TOTAL_TIMEOUT_MS);
     activeRequest = requestRef;
 
-    handleAISuggestionStream(msg.data, port, controller.signal).finally(() => {
-      clearTimeout(requestRef.timeoutId);
+    handleAISuggestionStream(msg.data, port, requestRef).finally(() => {
+      clearRequestTimers(requestRef);
       if (activeRequest === requestRef) activeRequest = null;
     });
   });
@@ -144,13 +184,16 @@ const PROVIDERS = {
     buildUrl: (apiKey, model) =>
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
     buildHeaders: () => ({ 'Content-Type': 'application/json' }),
-    buildBody: (systemPrompt, messages, _model) => ({
+    buildBody: (systemPrompt, messages, _model, options = {}) => ({
       systemInstruction: { parts: [{ text: systemPrompt }] },
       contents: messages.map(m => ({
         role: m.role === 'assistant' ? 'model' : 'user',
         parts: [{ text: m.content }]
       })),
-      generationConfig: { maxOutputTokens: 1024, temperature: 0.6 }
+      generationConfig: {
+        maxOutputTokens: options.maxCompletionTokens || DEFAULT_MAX_COMPLETION_TOKENS,
+        temperature: options.temperature ?? 0.4
+      }
     }),
     extractText: (data) => data.candidates?.[0]?.content?.parts?.[0]?.text,
     wasTruncated: (data) => data.candidates?.[0]?.finishReason === 'MAX_TOKENS',
@@ -166,14 +209,14 @@ const PROVIDERS = {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${apiKey}`
     }),
-    buildBody: (systemPrompt, messages, model) => ({
+    buildBody: (systemPrompt, messages, model, options = {}) => ({
       model,
       messages: [
         { role: 'system', content: systemPrompt },
         ...messages
       ],
-      max_tokens: 1024,
-      temperature: 0.6
+      max_tokens: options.maxCompletionTokens || DEFAULT_MAX_COMPLETION_TOKENS,
+      temperature: options.temperature ?? 0.4
     }),
     extractText: (data) => data.choices?.[0]?.message?.content,
     wasTruncated: (data) => data.choices?.[0]?.finish_reason === 'length',
@@ -190,26 +233,70 @@ const PROVIDERS = {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${apiKey}`,
       'HTTP-Referer': 'chrome-extension://interview-assistant',
-      'X-Title': 'Interview Assistant AI'
+      'X-OpenRouter-Title': 'Interview Assistant AI'
     }),
-    buildBody: (systemPrompt, messages, model) => ({
-      model,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        ...messages
-      ],
-      max_tokens: 1024,
-      temperature: 0.6
-    }),
+    buildBody: (systemPrompt, messages, model, options = {}) => {
+      const systemContent = String(model || '').startsWith('anthropic/')
+        ? [{
+            type: 'text',
+            text: systemPrompt,
+            cache_control: { type: 'ephemeral', ttl: '1h' }
+          }]
+        : systemPrompt;
+      const body = {
+        model,
+        messages: [
+          { role: 'system', content: systemContent },
+          ...messages
+        ],
+        max_completion_tokens: options.maxCompletionTokens || DEFAULT_MAX_COMPLETION_TOKENS,
+        temperature: options.temperature ?? 0.4
+      };
+      if (options.sessionId) body.session_id = options.sessionId;
+      if (options.routing && options.routing !== 'balanced') {
+        body.provider = {
+          sort: options.routing === 'price' ? 'price' : 'latency',
+          allow_fallbacks: true
+        };
+      }
+      if (options.reasoningEffort && options.reasoningEffort !== 'none') {
+        body.reasoning = { effort: options.reasoningEffort };
+      }
+      return body;
+    },
     extractText: (data) => data.choices?.[0]?.message?.content,
     wasTruncated: (data) => data.choices?.[0]?.finish_reason === 'length',
     buildTestBody: (model) => ({
       model,
       messages: [{ role: 'user', content: 'test' }],
-      max_tokens: 5
+      max_completion_tokens: 5
     })
   }
 };
+
+function normalizeUsage(rawUsage) {
+  if (!rawUsage || typeof rawUsage !== 'object') return null;
+  const promptDetails = rawUsage.prompt_tokens_details || rawUsage.promptTokensDetails || {};
+  const completionDetails = rawUsage.completion_tokens_details || rawUsage.completionTokensDetails || {};
+  const value = (v) => Number.isFinite(Number(v)) ? Number(v) : 0;
+  return {
+    promptTokens: value(rawUsage.prompt_tokens ?? rawUsage.promptTokens),
+    completionTokens: value(rawUsage.completion_tokens ?? rawUsage.completionTokens),
+    reasoningTokens: value(
+      rawUsage.reasoning_tokens ?? rawUsage.reasoningTokens ??
+      completionDetails.reasoning_tokens ?? completionDetails.reasoningTokens
+    ),
+    cachedTokens: value(
+      rawUsage.cached_tokens ?? rawUsage.cachedTokens ??
+      promptDetails.cached_tokens ?? promptDetails.cachedTokens
+    ),
+    cacheWriteTokens: value(
+      rawUsage.cache_write_tokens ?? rawUsage.cacheWriteTokens ??
+      promptDetails.cache_write_tokens ?? promptDetails.cacheWriteTokens
+    ),
+    cost: value(rawUsage.cost)
+  };
+}
 
 function waitForRetry(ms, signal) {
   return new Promise((resolve, reject) => {
@@ -228,6 +315,16 @@ function waitForRetry(ms, signal) {
   });
 }
 
+function getRetryDelayMs(response, fallbackMs) {
+  const raw = response?.headers?.get?.('Retry-After');
+  if (!raw) return fallbackMs;
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds * 1000);
+  const retryAt = Date.parse(raw);
+  if (!Number.isNaN(retryAt)) return Math.max(0, retryAt - Date.now());
+  return fallbackMs;
+}
+
 async function fetchWithRetry(url, options, maxRetries = 3, initialDelayMs = 500) {
   let delay = initialDelayMs;
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -242,9 +339,10 @@ async function fetchWithRetry(url, options, maxRetries = 3, initialDelayMs = 500
         return response;
       }
       
-      console.warn(`[background] Intento ${attempt} falló con estado ${response.status}. Reintentando en ${delay}ms...`);
-      await waitForRetry(delay, options?.signal);
-      delay *= 2;
+      const retryDelay = getRetryDelayMs(response, delay);
+      console.warn(`[background] Intento ${attempt} falló con estado ${response.status}. Reintentando en ${retryDelay}ms...`);
+      await waitForRetry(retryDelay, options?.signal);
+      delay = Math.max(delay * 2, retryDelay);
     } catch (err) {
       if (options?.signal?.aborted) {
         throw new Error(options.signal.reason?.message || 'Solicitud cancelada.');
@@ -259,7 +357,36 @@ async function fetchWithRetry(url, options, maxRetries = 3, initialDelayMs = 500
   }
 }
 
-async function handleAISuggestion({ provider, apiKey, model, systemPrompt, messages }) {
+function buildRequestOptions(data = {}) {
+  const requestedMax = Number(data.maxCompletionTokens) || DEFAULT_MAX_COMPLETION_TOKENS;
+  const modelMax = Number(data.modelMetadata?.maxCompletionTokens);
+  return {
+    maxCompletionTokens: Number.isFinite(modelMax) && modelMax > 0
+      ? Math.min(requestedMax, modelMax)
+      : requestedMax,
+    temperature: data.temperature,
+    sessionId: data.meetingSessionId,
+    routing: data.openRouterRouting || 'balanced',
+    reasoningEffort: data.reasoningEffort || 'none'
+  };
+}
+
+function validateApproximateContext(systemPrompt, messages, modelMetadata, maxCompletionTokens) {
+  const contextLength = Number(modelMetadata?.contextLength);
+  if (!Number.isFinite(contextLength) || contextLength <= 0) return;
+  const chars = String(systemPrompt || '').length + (messages || [])
+    .reduce((sum, item) => sum + String(item?.content || '').length, 0);
+  const approximateInputTokens = Math.ceil(chars / 4);
+  if (approximateInputTokens + maxCompletionTokens > Math.floor(contextLength * 0.95)) {
+    throw new Error(
+      `El contexto estimado (${approximateInputTokens.toLocaleString('es')} tokens) no cabe en ` +
+      `el modelo seleccionado (${contextLength.toLocaleString('es')} tokens). Reduce el contexto o cambia de modelo.`
+    );
+  }
+}
+
+async function handleAISuggestion(requestData) {
+  const { provider, apiKey, model, systemPrompt, messages, modelMetadata } = requestData;
   const prov = PROVIDERS[provider] || PROVIDERS.gemini;
   const controller = new globalThis.AbortController();
   const timeoutId = setTimeout(() => {
@@ -268,7 +395,9 @@ async function handleAISuggestion({ provider, apiKey, model, systemPrompt, messa
 
   const url = prov.buildUrl(apiKey, model);
   const headers = prov.buildHeaders(apiKey);
-  const body = prov.buildBody(systemPrompt, messages, model);
+  const requestOptions = buildRequestOptions(requestData);
+  validateApproximateContext(systemPrompt, messages, modelMetadata, requestOptions.maxCompletionTokens);
+  const body = prov.buildBody(systemPrompt, messages, model, requestOptions);
   if (DEBUG_PROMPT_LOGS) {
     const systemChars = String(systemPrompt || '').length;
     const messageChars = (messages || []).reduce((sum, m) => sum + String(m?.content || '').length, 0);
@@ -320,11 +449,11 @@ async function handleAISuggestion({ provider, apiKey, model, systemPrompt, messa
       throw new Error(normalizeProviderError(provider, response.status, rawMsg));
     }
 
-    const data = await response.json();
-    const text = prov.extractText(data);
+    const responseData = await response.json();
+    const text = prov.extractText(responseData);
     if (!text) throw new Error('Respuesta vacía del modelo');
-    const truncated = typeof prov.wasTruncated === 'function' && prov.wasTruncated(data);
-    return { text, truncated };
+    const truncated = typeof prov.wasTruncated === 'function' && prov.wasTruncated(responseData);
+    return { text, truncated, usage: normalizeUsage(responseData.usage) };
   } catch (err) {
     if (controller.signal.aborted) {
       throw new Error(controller.signal.reason?.message || 'Solicitud cancelada.');
@@ -504,6 +633,20 @@ function openRouterModelIsFree(m) {
   return prompt === 0 && completion === 0;
 }
 
+function formatContextLength(tokens) {
+  const value = Number(tokens);
+  if (!Number.isFinite(value) || value <= 0) return '';
+  if (value >= 1000000) return `${(value / 1000000).toFixed(value % 1000000 === 0 ? 0 : 1)}M`;
+  return `${Math.round(value / 1000)}K`;
+}
+
+function formatPerMillion(rawPrice) {
+  const value = Number(rawPrice);
+  if (!Number.isFinite(value) || value < 0) return '';
+  const perMillion = value * 1000000;
+  return `$${perMillion < 0.01 ? perMillion.toFixed(4) : perMillion.toFixed(2)}`;
+}
+
 /**
  * OpenRouter — catálogo público; con Bearer se asocia a tu cuenta.
  * onlyFree: por defecto en el popup (evita miles de modelos de pago en el <select>).
@@ -516,7 +659,7 @@ async function listOpenRouterModels(apiKey, options = {}) {
     Accept: 'application/json',
     'Content-Type': 'application/json',
     'HTTP-Referer': 'chrome-extension://interview-assistant',
-    'X-Title': 'Interview Assistant AI'
+    'X-OpenRouter-Title': 'Interview Assistant AI'
   };
   if (key) {
     headers.Authorization = `Bearer ${key}`;
@@ -548,9 +691,29 @@ async function listOpenRouterModels(apiKey, options = {}) {
 
     seen.add(id);
     const name = String(m.name || m.canonical_slug || '').trim();
-    const suffix = free ? ' (sin coste)' : '';
-    const label = name && name !== id ? `${name} — ${id}${suffix}` : `${id}${suffix}`;
-    collected.push({ value: id, label });
+    const contextLength = Number(m.context_length) || null;
+    const maxCompletionTokens = Number(m.top_provider?.max_completion_tokens) || null;
+    const inputPrice = formatPerMillion(m.pricing?.prompt);
+    const outputPrice = formatPerMillion(m.pricing?.completion);
+    const details = free ? ['sin coste'] : [];
+    if (contextLength) details.push(`${formatContextLength(contextLength)} contexto`);
+    if (inputPrice && outputPrice) details.push(`${inputPrice}/${outputPrice} por M`);
+    const suffix = details.join(' · ');
+    const baseLabel = name && name !== id ? `${name} — ${id}` : id;
+    const label = suffix ? `${baseLabel} (${suffix})` : baseLabel;
+    collected.push({
+      value: id,
+      label,
+      metadata: {
+        contextLength,
+        maxCompletionTokens,
+        pricing: {
+          prompt: m.pricing?.prompt ?? null,
+          completion: m.pricing?.completion ?? null
+        },
+        supportedParameters: Array.isArray(m.supported_parameters) ? m.supported_parameters : []
+      }
+    });
   }
 
   collected.sort((a, b) => a.label.localeCompare(b.label, 'es', { sensitivity: 'base' }));
@@ -558,6 +721,23 @@ async function listOpenRouterModels(apiKey, options = {}) {
 }
 
 async function testApiKey(provider, apiKey, model) {
+  if (provider === 'openrouter') {
+    const response = await fetch('https://openrouter.ai/api/v1/key', {
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+        'HTTP-Referer': 'chrome-extension://interview-assistant',
+        'X-OpenRouter-Title': 'Interview Assistant AI'
+      }
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      const rawMsg = err.error?.message || err.message || '';
+      throw new Error(normalizeProviderError(provider, response.status, rawMsg));
+    }
+    return;
+  }
+
   const prov = PROVIDERS[provider] || PROVIDERS.gemini;
   const url = prov.buildUrl(apiKey, model);
   const headers = prov.buildHeaders(apiKey);
@@ -625,8 +805,20 @@ function postPortMessage(port, message) {
   }
 }
 
-async function handleAISuggestionStream({ provider, apiKey, model, systemPrompt, messages }, port, signal) {
+function createStreamingProviderError(parsedError) {
+  const type = parsedError?.metadata?.error_type || parsedError?.code || 'stream_error';
+  const message = parsedError?.message || parsedError?.metadata?.raw || 'Error del proveedor durante streaming.';
+  const error = new Error(`${message} (${type})`);
+  error.isProviderStreamError = true;
+  return error;
+}
+
+async function handleAISuggestionStream(requestData, port, requestRef) {
+  const {
+    provider, apiKey, model, systemPrompt, messages, modelMetadata
+  } = requestData;
   const prov = PROVIDERS[provider] || PROVIDERS.gemini;
+  const signal = requestRef.controller.signal;
 
   let url = prov.buildUrl(apiKey, model);
   if (provider === 'gemini') {
@@ -634,7 +826,14 @@ async function handleAISuggestionStream({ provider, apiKey, model, systemPrompt,
   }
 
   const headers = prov.buildHeaders(apiKey);
-  const body = prov.buildBody(systemPrompt, messages, model);
+  const requestOptions = buildRequestOptions(requestData);
+  try {
+    validateApproximateContext(systemPrompt, messages, modelMetadata, requestOptions.maxCompletionTokens);
+  } catch (err) {
+    postPortMessage(port, { type: 'error', error: err.message, partial: false });
+    return;
+  }
+  const body = prov.buildBody(systemPrompt, messages, model, requestOptions);
 
   if (provider === 'groq' || provider === 'openrouter') {
     body.stream = true;
@@ -648,6 +847,7 @@ async function handleAISuggestionStream({ provider, apiKey, model, systemPrompt,
     console.groupEnd();
   }
 
+  let receivedText = false;
   try {
     const response = await fetchWithRetry(url, {
       method: 'POST',
@@ -662,14 +862,19 @@ async function handleAISuggestionStream({ provider, apiKey, model, systemPrompt,
       throw new Error(normalizeProviderError(provider, response.status, rawMsg));
     }
 
+    requestRef.markActivity(false);
+
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
     let truncated = false;
+    let usage = null;
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
+
+      requestRef.markActivity(false);
 
       buffer += decoder.decode(value, { stream: true });
 
@@ -679,12 +884,16 @@ async function handleAISuggestionStream({ provider, apiKey, model, systemPrompt,
         for (const jsonStr of objects) {
           try {
             const parsed = JSON.parse(jsonStr);
+            if (parsed.error) throw createStreamingProviderError(parsed.error);
             const text = parsed.candidates?.[0]?.content?.parts?.[0]?.text || '';
             if (parsed.candidates?.[0]?.finishReason === 'MAX_TOKENS') truncated = true;
             if (text) {
+              receivedText = true;
+              requestRef.markActivity(true);
               postPortMessage(port, { type: 'chunk', text });
             }
           } catch (e) {
+            if (e.isProviderStreamError) throw e;
             console.warn('[background] Error al parsear chunk de Gemini:', e);
           }
         }
@@ -699,12 +908,17 @@ async function handleAISuggestionStream({ provider, apiKey, model, systemPrompt,
             if (dataStr === '[DONE]') continue;
             try {
               const parsed = JSON.parse(dataStr);
+              if (parsed.error) throw createStreamingProviderError(parsed.error);
+              if (parsed.usage) usage = normalizeUsage(parsed.usage);
               const text = parsed.choices?.[0]?.delta?.content || '';
               if (parsed.choices?.[0]?.finish_reason === 'length') truncated = true;
               if (text) {
+                receivedText = true;
+                requestRef.markActivity(true);
                 postPortMessage(port, { type: 'chunk', text });
               }
             } catch (e) {
+              if (e.isProviderStreamError) throw e;
               console.warn('[background] Error al parsear SSE chunk:', e);
             }
           }
@@ -717,25 +931,36 @@ async function handleAISuggestionStream({ provider, apiKey, model, systemPrompt,
       if (cleaned.startsWith('data: ') && !cleaned.includes('[DONE]')) {
         try {
           const parsed = JSON.parse(cleaned.slice(6));
+          if (parsed.error) throw createStreamingProviderError(parsed.error);
+          if (parsed.usage) usage = normalizeUsage(parsed.usage);
           const text = parsed.choices?.[0]?.delta?.content || '';
           if (parsed.choices?.[0]?.finish_reason === 'length') truncated = true;
           if (text) {
+            receivedText = true;
+            requestRef.markActivity(true);
             postPortMessage(port, { type: 'chunk', text });
           }
         } catch (err) {
+          if (err.isProviderStreamError) throw err;
           console.warn('[background] Error parsing residual SSE:', err);
         }
       }
     }
 
-    postPortMessage(port, { type: 'done', truncated });
+    postPortMessage(port, { type: 'done', truncated, usage });
 
   } catch (err) {
-    if (signal?.aborted && !String(signal.reason?.message || '').includes('tardó más')) return;
+    const abortMessage = String(signal?.reason?.message || '');
+    const wasExplicitCancellation = signal?.aborted && (
+      abortMessage.includes('Solicitud cancelada') ||
+      abortMessage.includes('Solicitud reemplazada') ||
+      abortMessage.includes('panel cerró')
+    );
+    if (wasExplicitCancellation) return;
     const errorMessage = signal?.aborted
       ? (signal.reason?.message || err.message)
       : err.message;
     console.error('[background] Error en stream:', errorMessage);
-    postPortMessage(port, { type: 'error', error: errorMessage });
+    postPortMessage(port, { type: 'error', error: errorMessage, partial: receivedText });
   }
 }

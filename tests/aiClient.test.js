@@ -55,8 +55,11 @@ describe('aiClient.js', () => {
       sessionLog: {
         findLastUserSpokeIndex: vi.fn(() => -1),
         buildSessionDigestForPrompt: vi.fn(() => ''),
+        getPendingMemoryUpdate: vi.fn(() => null),
+        applyStructuredMemory: vi.fn(),
         recordIaActivation: vi.fn(),
         recordIaResponse: vi.fn(),
+        recordApiUsage: vi.fn(),
         recordIaError: vi.fn()
       },
       ui: {

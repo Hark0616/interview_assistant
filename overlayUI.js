@@ -32,9 +32,10 @@
           isActive: state.isActive,
           isLoading: state.isLoading,
           manualMode: state.manualModeActive,
-          debounceMs: state.config?.debounceMs || 1800,
+          debounceMs: state.config?.debounceMs ?? 2800,
           userNote: state.userNote || '',
           statusText: document.getElementById('ia-status-text')?.textContent || '',
+          usageText: modules.sessionLog.formatUsageSummary(),
           statusState: document.getElementById('ia-status-dot')?.className?.match(/ia-dot-(\w+)/)?.[1] || 'idle',
           transcript: state.captionBuffer.slice(-5).map(c => ({ role: c.role, speaker: c.speaker, text: c.text })),
           suggestion: lastSuggestionForPanel,
@@ -71,6 +72,13 @@
         statusDot.classList.add(`ia-dot-${statusState || 'idle'}`);
       }
       sendPanelUpdate();
+    }
+
+    function updateUsage() {
+      const usageText = modules.sessionLog.formatUsageSummary();
+      const usageEl = document.getElementById('ia-usage-text');
+      if (usageEl) usageEl.textContent = usageText;
+      sendPanelUpdate({ usageText });
     }
 
     function renderTranscript() {
@@ -132,7 +140,8 @@
       state.isActive = !state.isActive;
       if (state.isActive) {
         const btn = document.getElementById('ia-activate-btn');
-        modules.sessionLog.resetSessionLog();
+        modules.sessionLog.ensureSessionLog();
+        updateUsage();
         modules.captionCapture.startCaptionObserver();
         if (btn) { btn.textContent = 'Detener'; btn.disabled = false; btn.classList.add('active'); }
         updateStatus('Capturando subtítulos. Preparando contexto...', 'active');
@@ -469,7 +478,7 @@
           </div>
           <div id="ia-debounce-row">
             <span class="ia-control-label">Espera: <span id="ia-debounce-val">1.8s</span></span>
-            <input type="range" id="ia-debounce-slider" min="500" max="5000" step="100" value="1800">
+            <input type="range" id="ia-debounce-slider" min="500" max="5000" step="100" value="2800">
           </div>
         </div>
 
@@ -481,7 +490,10 @@
         </div>
 
         <div id="ia-footer">
-          <span id="ia-status-text">Listo. Activa para comenzar.</span>
+          <div id="ia-footer-info">
+            <span id="ia-status-text">Listo. Activa para comenzar.</span>
+            <span id="ia-usage-text">0 req · 0 in · 0 out · $0.0000</span>
+          </div>
           <div id="ia-footer-actions">
             <button type="button" id="ia-download-log" title="Exportar registro (.txt): transcripción + marcas de la IA">Exportar</button>
             <button id="ia-activate-btn">Activar</button>
@@ -509,6 +521,7 @@
       displaySuggestion,
       setLoadingState,
       updateStatus,
+      updateUsage,
       highlightManualBtn,
       sendPanelUpdate,
       // APIs para comandos del panel (sin simular clics DOM)

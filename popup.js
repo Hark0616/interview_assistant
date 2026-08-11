@@ -76,6 +76,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const refreshModelsBtn = document.getElementById('refresh-models-btn');
   const openrouterFreeRow = document.getElementById('openrouter-free-row');
   const openrouterFreeOnly = document.getElementById('openrouter-free-only');
+  const openrouterRoutingRow = document.getElementById('openrouter-routing-row');
+  const openrouterReasoningRow = document.getElementById('openrouter-reasoning-row');
+  let savedConfig = {};
 
   function openRouterOnlyFree() {
     return openrouterFreeOnly ? openrouterFreeOnly.checked !== false : true;
@@ -105,6 +108,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const opt = document.createElement('option');
       opt.value = m.value;
       opt.textContent = m.label;
+      if (m.metadata) opt.dataset.metadata = JSON.stringify(m.metadata);
       select.appendChild(opt);
     }
     const want = preferredValue || '';
@@ -143,6 +147,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (openrouterFreeRow) {
       openrouterFreeRow.style.display = provider === 'openrouter' ? 'flex' : 'none';
+    }
+    if (openrouterRoutingRow) {
+      openrouterRoutingRow.style.display = provider === 'openrouter' ? 'block' : 'none';
+    }
+    if (openrouterReasoningRow) {
+      openrouterReasoningRow.style.display = provider === 'openrouter' ? 'block' : 'none';
     }
 
     const list =
@@ -241,6 +251,7 @@ document.addEventListener('DOMContentLoaded', () => {
       updateModels('gemini');
       return;
     }
+    savedConfig = cfg;
 
     const savedKeys = cfg.apiKeys || {};
     apiKeys.gemini = savedKeys.gemini || '';
@@ -268,6 +279,8 @@ document.addEventListener('DOMContentLoaded', () => {
     setValue('company', cfg.company || '');
     setValue('vaultUrl', cfg.vaultUrl || 'http://127.0.0.1:3847');
     setValue('vaultToken', cfg.vaultToken || '');
+    setValue('openRouterRouting', cfg.openRouterRouting || 'latency');
+    setValue('reasoningEffort', cfg.reasoningEffort || 'none');
 
     const key = apiKeys[p] || '';
     if (p === 'openrouter') {
@@ -389,21 +402,37 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!apiKey) return showResult('save-result', 'Ingresa una API Key para continuar', 'error');
 
     chrome.storage.local.get(['iaConfig'], (existing) => {
+      const selectedOption = modelSelect.selectedOptions?.[0];
+      let modelMetadata = null;
+      try {
+        modelMetadata = selectedOption?.dataset?.metadata
+          ? JSON.parse(selectedOption.dataset.metadata)
+          : null;
+      } catch {
+        modelMetadata = null;
+      }
+      if (!modelMetadata && savedConfig.model === modelSelect.value) {
+        modelMetadata = savedConfig.modelMetadata || null;
+      }
       const merged = {
         ...(existing.iaConfig || {}),
         provider,
         apiKey,
         apiKeys: { ...apiKeys },
         model: modelSelect.value,
+        modelMetadata,
         myName: getValue('myName'),
         cvProfile: getValue('cvProfile'),
         jobDescription: getValue('jobDescription'),
         company: getValue('company'),
         openRouterOnlyFree: openRouterOnlyFree(),
+        openRouterRouting: getValue('openRouterRouting') || 'latency',
+        reasoningEffort: getValue('reasoningEffort') || 'none',
         vaultUrl: getValue('vaultUrl') || 'http://127.0.0.1:3847',
         vaultToken: getValue('vaultToken'),
       };
       chrome.storage.local.set({ iaConfig: merged }, () => {
+        savedConfig = merged;
         showResult('save-result', 'Configuración guardada', 'success');
         chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
           const tab = tabs[0];

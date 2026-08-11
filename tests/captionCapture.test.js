@@ -28,7 +28,8 @@ describe('captionCapture.js - Microsoft Teams Logic', () => {
     modules = {
       sessionLog: {
         pushSessionTranscriptLine: vi.fn(),
-        syncSessionTranscriptLast: vi.fn()
+        syncSessionTranscriptLast: vi.fn(),
+        findLastUserSpokeIndex: vi.fn(() => -1)
       },
       ui: { updateStatus: vi.fn(), renderTranscript: vi.fn() },
       ai: { requestSuggestion: vi.fn() }

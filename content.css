@@ -310,6 +310,14 @@
   gap: 6px;
 }
 
+#ia-footer-info {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
 #ia-download-log {
   background: rgba(255,255,255,0.06);
   border: 1px solid var(--ia-border);
@@ -332,7 +340,12 @@
   font-size: 11px;
   color: var(--ia-text-muted);
   min-width: 0;
-  flex: 1;
+}
+
+#ia-usage-text {
+  color: rgba(148, 163, 184, 0.78);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
 }
 
 #ia-activate-btn {

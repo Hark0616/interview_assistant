@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.6.0
+
+- OpenRouter registra por sesión requests, tokens de entrada/salida, razonamiento, caché y costo real; el resumen aparece en overlay, panel y exportación.
+- Las llamadas usan `max_completion_tokens`, `session_id`, routing configurable por latencia/precio y prompt caching de una hora para modelos Claude.
+- El streaming detecta errores SSE aunque HTTP ya haya respondido 200, conserva texto parcial y usa timeouts separados para primer token, inactividad y duración total.
+- Los reintentos respetan `Retry-After`; el botón «Probar» valida OpenRouter con `GET /api/v1/key` sin generar tokens.
+- El catálogo OpenRouter muestra contexto y precios, persiste metadata y evita enviar prompts que excedan la ventana del modelo.
+- La memoria reemplaza el digest crudo creciente por resumen estructurado, ventana literal reciente y recuperación local de fragmentos relevantes; la transcripción completa sigue persistiendo localmente.
+- Las sesiones pueden restaurarse durante seis horas y ya no se borran al reactivar el asistente.
+- El modo automático espera más cuando una pregunta parece incompleta y usa huellas normalizadas para reducir llamadas duplicadas.
+
 ## 1.5.1
 
 - Cola de contexto para no perder preguntas que llegan durante una respuesta, con cancelación al detener y timeout de 30 segundos para el streaming.

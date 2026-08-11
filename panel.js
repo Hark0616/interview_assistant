@@ -13,6 +13,7 @@
   const el = {
     statusDot:        document.getElementById('ia-panel-status-dot'),
     statusText:       document.getElementById('ia-panel-status-text'),
+    usageText:        document.getElementById('ia-panel-usage-text'),
     transcript:       document.getElementById('ia-panel-transcript'),
     transcriptSection: document.getElementById('ia-panel-transcript-section'),
     suggestion:       document.getElementById('ia-panel-suggestion'),
@@ -81,6 +82,7 @@
     markConnected();
     updateStatusDot(state.statusState);
     updateStatusText(state.statusText);
+    if (state.usageText != null && el.usageText) el.usageText.textContent = state.usageText;
     if (state.transcript) updateTranscript(state.transcript, state.myName);
     if (state.suggestion != null) updateSuggestion(state.suggestion);
     if (state.isLoading != null) updateLoading(state.isLoading);

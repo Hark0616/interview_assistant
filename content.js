@@ -10,13 +10,18 @@
   // ══════════════════════════════════════
   const C = {
     CAPTION_BUFFER_MAX: 500,
-    AI_CONTEXT_MAX_LINES: 300,
-    AI_CONTEXT_MAX_CHARS: 60000,
+    AI_CONTEXT_MAX_LINES: 80,
+    AI_CONTEXT_MAX_CHARS: 24000,
     AI_REQUEST_COOLDOWN_MS: 2000,
     SESSION_TRANSCRIPT_MAX_LINES: 4000,
-    SESSION_DIGEST_MAX_CHARS: 45000,
+    SESSION_DIGEST_MAX_CHARS: 36000,
+    SESSION_MEMORY_MAX_CHARS: 10000,
+    SESSION_RECENT_MAX_LINES: 40,
+    SESSION_RECENT_MAX_CHARS: 24000,
+    SESSION_MEMORY_UPDATE_QUESTIONS: 5,
+    SESSION_MEMORY_UPDATE_INTERVAL_MS: 10 * 60 * 1000,
     SESSION_PERSIST_DEBOUNCE_MS: 2000,
-    SESSION_RESTORE_MAX_AGE_MS: 5 * 60 * 1000,
+    SESSION_RESTORE_MAX_AGE_MS: 6 * 60 * 60 * 1000,
     SESSION_PROMPT_STORE_MAX: 60000,
     SESSION_AI_EVENTS_MAX: 80,
     STORAGE_KEY_MEETING_LOG: 'iaMeetingSessionLog'
@@ -33,6 +38,7 @@
     debounceTimer: null,
     isLoading: false,
     lastSentText: '',
+    lastSentFingerprint: '',
     manualModeActive: false,
     lastUserSpokeId: null,
     nextCaptionLineId: 1,
@@ -42,6 +48,12 @@
     meetingSessionId: '',
     sessionTranscript: [],
     sessionAiEvents: [],
+    sessionMemory: '',
+    sessionMemoryProcessedCaptionId: null,
+    sessionMemoryUpdatedAt: 0,
+    sessionQuestionsSinceMemoryUpdate: 0,
+    sessionUsage: null,
+    sessionWasRestored: false,
     persistSessionTimer: null,
     lastAiRequestCompletedAt: 0,
     pendingAiRequest: false,
@@ -126,6 +138,7 @@
         modules.sessionLog.restoreSessionLog((restored) => {
           if (restored) {
             modules.ui.renderTranscript();
+            modules.ui.updateUsage();
             modules.ui.updateStatus('Sesión previa restaurada (reciente)', 'idle');
             return;
           }
