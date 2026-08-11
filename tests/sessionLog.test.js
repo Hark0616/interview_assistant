@@ -37,28 +37,24 @@ describe('sessionLog.js', () => {
       lastUserSpokeId: null,
       lastAiContextCaptionId: null,
       persistSessionTimer: null,
-      sessionMemory: '',
-      sessionMemoryProcessedCaptionId: null,
-      sessionMemoryUpdatedAt: Date.now(),
-      sessionQuestionsSinceMemoryUpdate: 0,
       sessionUsage: null
     };
     C = {
       SESSION_TRANSCRIPT_MAX_LINES: 4000,
       SESSION_AI_EVENTS_MAX: 80,
-      SESSION_MEMORY_MAX_CHARS: 10000,
       SESSION_RECENT_MAX_LINES: 5,
       SESSION_RECENT_MAX_CHARS: 2000,
       SESSION_DIGEST_MAX_CHARS: 5000,
-      SESSION_MEMORY_UPDATE_QUESTIONS: 5,
-      SESSION_MEMORY_UPDATE_INTERVAL_MS: 10 * 60 * 1000,
       SESSION_PERSIST_DEBOUNCE_MS: 0,
       SESSION_RESTORE_MAX_AGE_MS: 6 * 60 * 60 * 1000,
       SESSION_PROMPT_STORE_MAX: 60000,
       CAPTION_BUFFER_MAX: 500,
       STORAGE_KEY_MEETING_LOG: 'iaMeetingSessionLog'
     };
-    modules = { ui: { updateUsage: vi.fn() } };
+    modules = {
+      ui: { updateUsage: vi.fn() },
+      memoryLedger: { notifyTranscriptChanged: vi.fn(), formatMarkdown: vi.fn(() => '') }
+    };
 
     const code = fs.readFileSync(path.resolve(__dirname, '../sessionLog.js'), 'utf8');
     eval(code);
@@ -74,8 +70,7 @@ describe('sessionLog.js', () => {
     expect(state.sessionTranscript).toHaveLength(1);
   });
 
-  it('combina memoria estructurada con una ventana literal reciente limitada', () => {
-    state.sessionMemory = 'TEMAS Y PREGUNTAS CUBIERTOS\nAPIs REST';
+  it('combina una ventana literal reciente con fragmentos relevantes sin sugerencias IA', () => {
     state.sessionTranscript = Array.from({ length: 10 }, (_, index) => ({
       t: Date.now(),
       captionId: index + 1,
@@ -90,30 +85,14 @@ describe('sessionLog.js', () => {
     }));
     state.lastUserSpokeId = 10;
 
-    const digest = sessionLog.buildSessionDigestForPrompt('¿Cómo implementaste OAuth?');
+    state.sessionAiEvents = [{ kind: 'response', text: 'Sugerencia que no debe ser memoria' }];
+    const digest = sessionLog.buildTranscriptContextForPrompt('¿Cómo implementaste OAuth?');
 
-    expect(digest).toContain('MEMORIA CONSOLIDADA');
-    expect(digest).toContain('APIs REST');
     expect(digest).toContain('línea 10');
     expect(digest).toContain('FRAGMENTOS ANTERIORES RELEVANTES');
     expect(digest).toContain('autenticación OAuth');
     expect(digest).not.toContain('línea 1\n');
-  });
-
-  it('crea y aplica una actualización de memoria cada cinco respuestas', () => {
-    state.sessionTranscript = [{
-      t: Date.now(), captionId: 7, role: 'interviewer', speaker: 'I', text: 'Pregunta técnica'
-    }];
-    state.sessionQuestionsSinceMemoryUpdate = 5;
-
-    const pending = sessionLog.getPendingMemoryUpdate();
-    expect(pending.lastCaptionId).toBe(7);
-    expect(pending.transcript).toContain('Pregunta técnica');
-
-    sessionLog.applyStructuredMemory('MEMORIA NUEVA', pending.lastCaptionId);
-    expect(state.sessionMemory).toBe('MEMORIA NUEVA');
-    expect(state.sessionMemoryProcessedCaptionId).toBe(7);
-    expect(state.sessionQuestionsSinceMemoryUpdate).toBe(0);
+    expect(digest).not.toContain('Sugerencia que no debe ser memoria');
   });
 
   it('acumula tokens, caché, razonamiento y costo', () => {
@@ -139,7 +118,7 @@ describe('sessionLog.js', () => {
     expect(modules.ui.updateUsage).toHaveBeenCalled();
   });
 
-  it('restaura más de 800 líneas junto con memoria y uso', async () => {
+  it('restaura más de 800 líneas y entrega la memoria 1.6.0 para migración', async () => {
     const transcript = Array.from({ length: 1000 }, (_, index) => ({
       t: Date.now(), captionId: index + 1, role: 'interviewer', text: `línea ${index}`
     }));
@@ -155,11 +134,13 @@ describe('sessionLog.js', () => {
       }
     };
 
-    const restored = await new Promise((resolve) => sessionLog.restoreSessionLog(resolve));
+    const restored = await new Promise((resolve) => {
+      sessionLog.restoreSessionLog((ok, legacy) => resolve({ ok, legacy }));
+    });
 
-    expect(restored).toBe(true);
+    expect(restored.ok).toBe(true);
     expect(state.sessionTranscript).toHaveLength(1000);
-    expect(state.sessionMemory).toBe('memoria persistida');
+    expect(restored.legacy.memory).toBe('memoria persistida');
     expect(state.sessionUsage.requests).toBe(4);
     expect(state.sessionWasRestored).toBe(true);
   });

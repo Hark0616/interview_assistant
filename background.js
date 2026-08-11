@@ -9,6 +9,16 @@ const AI_STREAM_FIRST_TOKEN_TIMEOUT_MS = 20000;
 const AI_STREAM_INACTIVITY_TIMEOUT_MS = 15000;
 const AI_STREAM_TOTAL_TIMEOUT_MS = 90000;
 const DEFAULT_MAX_COMPLETION_TOKENS = 512;
+const activeMemoryRequests = new Map();
+
+function cancelMemoryRequest(meetingSessionId, reason = 'Solicitud principal iniciada.') {
+  if (!meetingSessionId) return false;
+  const active = activeMemoryRequests.get(meetingSessionId);
+  if (!active) return false;
+  activeMemoryRequests.delete(meetingSessionId);
+  active.controller.abort(new Error(reason));
+  return true;
+}
 
 // Atajo global (configurable en chrome://extensions/shortcuts) → pestaña Meet activa
 chrome.commands.onCommand.addListener((command) => {
@@ -22,6 +32,7 @@ chrome.commands.onCommand.addListener((command) => {
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.type === 'GET_AI_SUGGESTION') {
+    cancelMemoryRequest(request.data?.meetingSessionId);
     handleAISuggestion(request.data)
       .then(result => sendResponse({
         success: true,
@@ -31,6 +42,39 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       }))
       .catch(err => sendResponse({ success: false, error: err.message }));
     return true;
+  }
+
+  if (request.type === 'GET_MEMORY_LEDGER_UPDATE') {
+    const sessionId = request.data?.meetingSessionId;
+    if (!sessionId) {
+      sendResponse({ success: false, error: 'La actualización de memoria requiere meetingSessionId.' });
+      return;
+    }
+    cancelMemoryRequest(sessionId, 'La actualización de memoria fue reemplazada.');
+    const controller = new globalThis.AbortController();
+    const requestRef = { controller, requestId: request.requestId };
+    activeMemoryRequests.set(sessionId, requestRef);
+    handleAISuggestion(request.data, controller)
+      .then((result) => sendResponse({
+        success: true,
+        suggestion: result.text,
+        truncated: result.truncated,
+        usage: result.usage
+      }))
+      .catch((err) => sendResponse({ success: false, error: err.message }))
+      .finally(() => {
+        if (activeMemoryRequests.get(sessionId) === requestRef) activeMemoryRequests.delete(sessionId);
+      });
+    return true;
+  }
+
+  if (request.type === 'CANCEL_MEMORY_LEDGER_UPDATE') {
+    const active = activeMemoryRequests.get(request.meetingSessionId);
+    if (active && (!request.requestId || active.requestId === request.requestId)) {
+      cancelMemoryRequest(request.meetingSessionId, request.reason || 'Actualización de memoria cancelada.');
+    }
+    sendResponse({ success: true });
+    return;
   }
 
   if (request.type === 'TEST_API_KEY') {
@@ -87,6 +131,8 @@ chrome.runtime.onConnect.addListener((port) => {
     }
 
     if (msg.type !== 'GET_AI_SUGGESTION_STREAM') return;
+
+    cancelMemoryRequest(msg.data?.meetingSessionId);
 
     cancelActiveRequest('Solicitud reemplazada por una petición nueva.');
     const controller = new globalThis.AbortController();
@@ -385,10 +431,10 @@ function validateApproximateContext(systemPrompt, messages, modelMetadata, maxCo
   }
 }
 
-async function handleAISuggestion(requestData) {
+async function handleAISuggestion(requestData, controllerOverride = null) {
   const { provider, apiKey, model, systemPrompt, messages, modelMetadata } = requestData;
   const prov = PROVIDERS[provider] || PROVIDERS.gemini;
-  const controller = new globalThis.AbortController();
+  const controller = controllerOverride || new globalThis.AbortController();
   const timeoutId = setTimeout(() => {
     controller.abort(new Error(`La IA tardó más de ${AI_REQUEST_TIMEOUT_MS / 1000} segundos.`));
   }, AI_REQUEST_TIMEOUT_MS);

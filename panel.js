@@ -6,7 +6,7 @@
 (function () {
   'use strict';
 
-  const { escapeHtml, FONT_LEVELS, renderCaptionLines } = window.__ia.utils;
+  const { escapeHtml, FONT_LEVELS, renderCaptionLines, renderMemoryBullets } = window.__ia.utils;
 
   // ── Refs a elementos DOM ──
 
@@ -34,6 +34,13 @@
     dockBtn:          document.getElementById('ia-panel-dock-btn'),
     downloadLog:      document.getElementById('ia-panel-download-log'),
     disconnected:     document.getElementById('ia-panel-disconnected'),
+    memorySection:    document.getElementById('ia-panel-memory-section'),
+    memoryCollapse:   document.getElementById('ia-panel-memory-collapse'),
+    memoryCount:      document.getElementById('ia-panel-memory-count'),
+    memoryStatus:     document.getElementById('ia-panel-memory-status'),
+    memoryList:       document.getElementById('ia-panel-memory-list'),
+    memoryJson:       document.getElementById('ia-panel-memory-json'),
+    memoryMd:         document.getElementById('ia-panel-memory-md'),
   };
 
   // ── Estado local del panel ──
@@ -44,6 +51,7 @@
   let currentSuggestionText = '';
   let fontIdx = 0;
   let noteErrorTimer = null;
+  let currentMemory = { bullets: [], count: 0, categoryLabels: {}, status: {} };
 
   // ── Comunicación con content script (vía background relay) ──
 
@@ -85,6 +93,7 @@
     if (state.usageText != null && el.usageText) el.usageText.textContent = state.usageText;
     if (state.transcript) updateTranscript(state.transcript, state.myName);
     if (state.suggestion != null) updateSuggestion(state.suggestion);
+    if (state.memory != null) updateMemory(state.memory);
     if (state.isLoading != null) updateLoading(state.isLoading);
     if (state.isActive != null) updateActivateBtn(state.isActive);
     if (state.manualMode != null) updateModeButtons(state.manualMode);
@@ -148,6 +157,16 @@
     el.debounceVal.textContent = (ms / 1000).toFixed(1) + 's';
   }
 
+  function updateMemory(memory) {
+    currentMemory = memory;
+    if (el.memoryList) el.memoryList.innerHTML = renderMemoryBullets(memory);
+    if (el.memoryCount) el.memoryCount.textContent = String(memory.count || 0);
+    if (el.memoryStatus) {
+      el.memoryStatus.textContent = memory.status?.text || 'Memoria lista';
+      el.memoryStatus.dataset.state = memory.status?.status || 'idle';
+    }
+  }
+
   // ── Event handlers ──
 
   function setupEvents() {
@@ -162,6 +181,31 @@
     el.refreshBtn.addEventListener('click', () => sendCommand('requestSuggestion'));
     el.sendBtn.addEventListener('click', () => sendCommand('requestSuggestion'));
     el.downloadLog.addEventListener('click', () => sendCommand('downloadLog'));
+    el.memoryJson?.addEventListener('click', () => sendCommand('exportMemory', { format: 'json' }));
+    el.memoryMd?.addEventListener('click', () => sendCommand('exportMemory', { format: 'md' }));
+
+    el.memoryCollapse?.addEventListener('click', () => {
+      const collapsed = el.memorySection.classList.toggle('ia-memory-collapsed');
+      el.memoryCollapse.textContent = collapsed ? '▸' : '▾';
+      el.memoryCollapse.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    });
+
+    el.memoryList?.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-memory-action]');
+      const row = event.target.closest('[data-memory-id]');
+      if (!button || !row) return;
+      const id = row.dataset.memoryId;
+      const action = button.dataset.memoryAction;
+      if (action === 'edit') {
+        const bullet = currentMemory.bullets?.find((item) => item.id === id);
+        const text = window.prompt('Editar bullet de memoria', bullet?.text || '');
+        if (text != null) sendCommand('editMemoryBullet', { id, text });
+      } else if (action === 'pin') {
+        sendCommand('toggleMemoryBulletPin', { id });
+      } else if (action === 'retire') {
+        sendCommand('retireMemoryBullet', { id });
+      }
+    });
 
     el.modeAuto.addEventListener('click', () => sendCommand('setMode', { manual: false }));
     el.modeManual.addEventListener('click', () => sendCommand('setMode', { manual: true }));

@@ -1,5 +1,5 @@
 // content.js — Orquestador: estado compartido, constantes, inicialización y wiring de módulos
-// Se carga último (después de sessionLog.js, captionCapture.js, aiClient.js, overlayUI.js)
+// Se carga último (después de sessionLog.js, memoryLedger.js, captionCapture.js, aiClient.js, overlayUI.js)
 // Cada módulo se registra como factory en window.__ia y se instancia aquí.
 
 (function () {
@@ -15,16 +15,22 @@
     AI_REQUEST_COOLDOWN_MS: 2000,
     SESSION_TRANSCRIPT_MAX_LINES: 4000,
     SESSION_DIGEST_MAX_CHARS: 36000,
-    SESSION_MEMORY_MAX_CHARS: 10000,
     SESSION_RECENT_MAX_LINES: 40,
     SESSION_RECENT_MAX_CHARS: 24000,
     SESSION_MEMORY_UPDATE_QUESTIONS: 5,
     SESSION_MEMORY_UPDATE_INTERVAL_MS: 10 * 60 * 1000,
+    SESSION_MEMORY_UPDATE_RETRY_MS: 60 * 1000,
+    MEMORY_UPDATE_DELAY_MS: 2000,
+    MEMORY_UPDATE_MAX_TRANSCRIPT_CHARS: 40000,
+    MEMORY_LEDGER_PROMPT_MAX_CHARS: 12000,
+    MEMORY_LEDGER_MAX_ACTIVE: 250,
+    MEMORY_LEDGER_MAX_RECORDS: 500,
     SESSION_PERSIST_DEBOUNCE_MS: 2000,
     SESSION_RESTORE_MAX_AGE_MS: 6 * 60 * 60 * 1000,
     SESSION_PROMPT_STORE_MAX: 60000,
     SESSION_AI_EVENTS_MAX: 80,
-    STORAGE_KEY_MEETING_LOG: 'iaMeetingSessionLog'
+    STORAGE_KEY_MEETING_LOG: 'iaMeetingSessionLog',
+    STORAGE_KEY_MEMORY_LEDGER_PREFIX: 'iaInterviewMemoryLedger:'
   };
 
   // ══════════════════════════════════════
@@ -48,10 +54,8 @@
     meetingSessionId: '',
     sessionTranscript: [],
     sessionAiEvents: [],
-    sessionMemory: '',
-    sessionMemoryProcessedCaptionId: null,
-    sessionMemoryUpdatedAt: 0,
-    sessionQuestionsSinceMemoryUpdate: 0,
+    memoryLedger: null,
+    memoryLedgerStatus: { status: 'idle', text: 'Memoria lista', updatedAt: 0 },
     sessionUsage: null,
     sessionWasRestored: false,
     persistSessionTimer: null,
@@ -72,6 +76,8 @@
     transcriptFollowLatest: true,
     /** Si true, el panel de transcripción está oculto (más espacio para sugerencia — ux-8) */
     transcriptCollapsed: false,
+    /** Memoria semántica plegada por defecto para no quitar espacio a la sugerencia. */
+    memoryCollapsed: true,
     /** Si true, el panel pop-out está abierto y el overlay in-page está oculto */
     panelActive: false
   };
@@ -84,6 +90,7 @@
   // ══════════════════════════════════════
   const modules = {};
   modules.sessionLog = window.__ia.createSessionLog(state, C, modules);
+  modules.memoryLedger = window.__ia.createMemoryLedger(state, C, modules);
   modules.captionCapture = window.__ia.createCaptionCapture(state, C, modules);
   modules.ai = window.__ia.createAiClient(state, C, modules);
   modules.ui = window.__ia.createOverlayUI(state, C, modules);
@@ -135,11 +142,16 @@
       loadConfig((cfg) => {
         modules.ui.createOverlay();
         const statusIdle = isTeamsWebSurface() && !document.querySelector('[data-tid="hangup-button"]');
-        modules.sessionLog.restoreSessionLog((restored) => {
+        modules.sessionLog.restoreSessionLog((restored, legacyMemory) => {
           if (restored) {
-            modules.ui.renderTranscript();
-            modules.ui.updateUsage();
-            modules.ui.updateStatus('Sesión previa restaurada (reciente)', 'idle');
+            modules.memoryLedger.restoreAndMigrate(legacyMemory).finally(() => {
+              // Reescribe el log con el esquema 1.7.0 una vez que el legado quedó en el ledger.
+              modules.sessionLog.flushPersistSessionLog();
+              modules.ui.renderTranscript();
+              modules.ui.renderMemory();
+              modules.ui.updateUsage();
+              modules.ui.updateStatus('Sesión previa restaurada (reciente)', 'idle');
+            });
             return;
           }
           if (cfg) {
@@ -297,6 +309,18 @@
         modules.sessionLog.downloadSessionLogFile();
         modules.ui.updateStatus('Registro exportado (.txt)', 'active');
         break;
+      case 'editMemoryBullet':
+        modules.memoryLedger.editBullet(data?.id, data?.text);
+        break;
+      case 'toggleMemoryBulletPin':
+        modules.memoryLedger.togglePin(data?.id);
+        break;
+      case 'retireMemoryBullet':
+        modules.memoryLedger.retireBullet(data?.id);
+        break;
+      case 'exportMemory':
+        modules.memoryLedger.exportData(data?.format || 'json');
+        break;
       case 'dockBack':
         state.panelActive = false;
         modules.ui.showOverlay();
@@ -308,6 +332,7 @@
   function cleanup() {
     modules.captionCapture.stopCaptionObserver();
     modules.ai.cancelCurrentRequest();
+    modules.memoryLedger.cancelUpdate('La pestaña se cerró.');
     clearTimeout(state.debounceTimer);
   }
 

@@ -35,4 +35,19 @@ describe('utils.js', () => {
     expect(html).toContain('MiNombre');
     expect(html).toContain('Qué tal');
   });
+
+  it('renderiza controles de memoria escapando contenido editable', () => {
+    const html = window.__ia.utils.renderMemoryBullets({
+      categoryLabels: { 'candidate-fact': 'Hechos' },
+      bullets: [{
+        id: 'bullet-1', category: 'candidate-fact', text: '<script>dato</script>',
+        confidence: 'confirmed', origin: 'manual', pinned: true, sourceCaptionIds: [7]
+      }]
+    });
+
+    expect(html).toContain('&lt;script&gt;dato&lt;/script&gt;');
+    expect(html).toContain('data-memory-action="edit"');
+    expect(html).toContain('Desfijar');
+    expect(html).toContain('caps 7');
+  });
 });

@@ -70,6 +70,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const providerSelect = document.getElementById('provider');
   const modelSelect = document.getElementById('model');
+  const memoryModelSelect = document.getElementById('memoryModel');
   const apiKeyInput = document.getElementById('apiKey');
   const hintEl = document.getElementById('api-hint');
   const modelHintEl = document.getElementById('model-hint');
@@ -117,6 +118,24 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  function fillMemoryModelSelect(models, preferredValue) {
+    memoryModelSelect.innerHTML = '';
+    const defaultOption = document.createElement('option');
+    defaultOption.value = '';
+    defaultOption.textContent = 'Usar modelo principal';
+    memoryModelSelect.appendChild(defaultOption);
+    for (const model of models) {
+      const option = document.createElement('option');
+      option.value = model.value;
+      option.textContent = model.label;
+      if (model.metadata) option.dataset.metadata = JSON.stringify(model.metadata);
+      memoryModelSelect.appendChild(option);
+    }
+    if (preferredValue && [...memoryModelSelect.options].some((option) => option.value === preferredValue)) {
+      memoryModelSelect.value = preferredValue;
+    }
+  }
+
   function updateModelHint(provider) {
     if (!modelHintEl) return;
     const n = modelsFromApi[provider]?.length;
@@ -161,6 +180,10 @@ document.addEventListener('DOMContentLoaded', () => {
         : fallbackModels(provider);
 
     fillModelSelect(modelSelect, list, prev);
+    const preferredMemory = savedConfig.provider === provider
+      ? (memoryModelSelect.value || savedConfig.memoryModel || '')
+      : '';
+    fillMemoryModelSelect(list, preferredMemory);
     updateModelHint(provider);
   }
 
@@ -222,6 +245,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   providerSelect.addEventListener('change', () => {
     const p = providerSelect.value;
+    memoryModelSelect.value = '';
     restoreKeyForProvider(p);
     updateModels(p);
     const key = getValue('apiKey');
@@ -271,6 +295,9 @@ document.addEventListener('DOMContentLoaded', () => {
     updateModels(p, cfg.model);
     if (cfg.model && [...modelSelect.options].some((o) => o.value === cfg.model)) {
       modelSelect.value = cfg.model;
+    }
+    if (cfg.memoryModel && [...memoryModelSelect.options].some((o) => o.value === cfg.memoryModel)) {
+      memoryModelSelect.value = cfg.memoryModel;
     }
     restoreKeyForProvider(p);
     setValue('myName', cfg.myName || '');
@@ -414,6 +441,19 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!modelMetadata && savedConfig.model === modelSelect.value) {
         modelMetadata = savedConfig.modelMetadata || null;
       }
+      const memoryModel = memoryModelSelect.value || '';
+      const memoryOption = memoryModelSelect.selectedOptions?.[0];
+      let memoryModelMetadata = null;
+      try {
+        memoryModelMetadata = memoryOption?.dataset?.metadata
+          ? JSON.parse(memoryOption.dataset.metadata)
+          : null;
+      } catch {
+        memoryModelMetadata = null;
+      }
+      if (!memoryModelMetadata && memoryModel && savedConfig.memoryModel === memoryModel) {
+        memoryModelMetadata = savedConfig.memoryModelMetadata || null;
+      }
       const merged = {
         ...(existing.iaConfig || {}),
         provider,
@@ -421,6 +461,8 @@ document.addEventListener('DOMContentLoaded', () => {
         apiKeys: { ...apiKeys },
         model: modelSelect.value,
         modelMetadata,
+        memoryModel,
+        memoryModelMetadata,
         myName: getValue('myName'),
         cvProfile: getValue('cvProfile'),
         jobDescription: getValue('jobDescription'),

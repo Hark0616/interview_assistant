@@ -1,4 +1,4 @@
-// sessionLog.js — Persistencia, transcripción de sesión, digest y descarga
+// sessionLog.js — Persistencia, transcripción de sesión, eventos, uso y descarga
 // Factory: window.__ia.createSessionLog(state, C, modules)
 // Dependencias externas: chrome.storage.local
 
@@ -60,10 +60,6 @@
         updatedAt: Date.now(),
         transcript: state.sessionTranscript.slice(-C.SESSION_TRANSCRIPT_MAX_LINES),
         aiEvents: state.sessionAiEvents.slice(-C.SESSION_AI_EVENTS_MAX),
-        memory: state.sessionMemory || '',
-        memoryProcessedCaptionId: state.sessionMemoryProcessedCaptionId ?? null,
-        memoryUpdatedAt: state.sessionMemoryUpdatedAt || 0,
-        questionsSinceMemoryUpdate: state.sessionQuestionsSinceMemoryUpdate || 0,
         usage: ensureUsage()
       };
       try {
@@ -81,6 +77,7 @@
       state.sessionTranscript.push({ t: Date.now(), speaker, role, text, captionId: captionId ?? null });
       trimSessionTranscript();
       schedulePersistSessionLog();
+      _modules.memoryLedger?.notifyTranscriptChanged?.();
     }
 
     function syncSessionTranscriptLast(speaker, role, text, captionId) {
@@ -91,6 +88,7 @@
         row.role = role;
         if (captionId != null) row.captionId = captionId;
         schedulePersistSessionLog();
+        _modules.memoryLedger?.notifyTranscriptChanged?.();
       } else {
         pushSessionTranscriptLine(speaker, role, text, captionId);
       }
@@ -100,10 +98,6 @@
       state.meetingSessionId = `${getMeetingCodeFromUrl()}-${Date.now()}`;
       state.sessionTranscript = [];
       state.sessionAiEvents = [];
-      state.sessionMemory = '';
-      state.sessionMemoryProcessedCaptionId = null;
-      state.sessionMemoryUpdatedAt = Date.now();
-      state.sessionQuestionsSinceMemoryUpdate = 0;
       state.sessionUsage = emptyUsage();
       state.sessionWasRestored = false;
       state.captionBuffer = [];
@@ -137,10 +131,6 @@
           ? data.aiEvents.slice(-C.SESSION_AI_EVENTS_MAX)
           : [];
         state.meetingSessionId = data.meetingSessionId || `${getMeetingCodeFromUrl()}-${Date.now()}`;
-        state.sessionMemory = String(data.memory || '').slice(0, C.SESSION_MEMORY_MAX_CHARS);
-        state.sessionMemoryProcessedCaptionId = data.memoryProcessedCaptionId ?? null;
-        state.sessionMemoryUpdatedAt = Number(data.memoryUpdatedAt) || Number(data.updatedAt) || Date.now();
-        state.sessionQuestionsSinceMemoryUpdate = Number(data.questionsSinceMemoryUpdate) || 0;
         state.sessionUsage = { ...emptyUsage(), ...(data.usage || {}) };
         state.sessionWasRestored = true;
 
@@ -158,7 +148,11 @@
         state.lastUserSpokeId = lastMe?.id ?? null;
         state.lastAiContextCaptionId = null;
 
-        callback?.(true);
+        callback?.(true, {
+          memory: String(data.memory || ''),
+          memoryProcessedCaptionId: data.memoryProcessedCaptionId ?? null,
+          memoryUpdatedAt: Number(data.memoryUpdatedAt) || Number(data.updatedAt) || Date.now()
+        });
       });
     }
 
@@ -220,9 +214,8 @@
         .map((item) => item.row);
     }
 
-    function buildSessionDigestForPrompt(queryText = '') {
+    function buildTranscriptContextForPrompt(queryText = '') {
       const prior = getPriorSessionLinesForDigest();
-      const memory = String(state.sessionMemory || '').trim();
       const recentRows = prior.slice(-C.SESSION_RECENT_MAX_LINES);
       const recentIds = new Set(recentRows.map((row) => row.captionId));
       const relevantRows = findRelevantTranscriptFragments(queryText, recentIds);
@@ -232,64 +225,15 @@
           recentText.slice(-C.SESSION_RECENT_MAX_CHARS);
       }
 
-      const responses = state.sessionAiEvents
-        .filter((event) => event.kind === 'response')
-        .slice(-2)
-        .map((event) => event.text.slice(0, 450));
-
       const sections = [];
-      if (memory) sections.push(`MEMORIA CONSOLIDADA DE LA ENTREVISTA:\n${memory}`);
+      if (recentText) sections.push(`VENTANA RECIENTE LITERAL:\n${recentText}`);
       if (relevantRows.length) {
         sections.push(`FRAGMENTOS ANTERIORES RELEVANTES:\n${formatTranscriptLines(relevantRows)}`);
-      }
-      if (recentText) sections.push(`VENTANA RECIENTE LITERAL:\n${recentText}`);
-      if (responses.length) {
-        sections.push(
-          'ÚLTIMAS RESPUESTAS SUGERIDAS (solo para coherencia; no repetir literalmente):\n' +
-          responses.join('\n---\n')
-        );
       }
 
       const combined = sections.join('\n\n');
       if (combined.length <= C.SESSION_DIGEST_MAX_CHARS) return combined;
       return combined.slice(0, C.SESSION_DIGEST_MAX_CHARS);
-    }
-
-    function getPendingMemoryUpdate() {
-      const questionThreshold = state.sessionQuestionsSinceMemoryUpdate >= C.SESSION_MEMORY_UPDATE_QUESTIONS;
-      const age = Date.now() - (state.sessionMemoryUpdatedAt || 0);
-      const timeThreshold = age >= C.SESSION_MEMORY_UPDATE_INTERVAL_MS;
-      if (!questionThreshold && !timeThreshold) return null;
-
-      const processedId = Number(state.sessionMemoryProcessedCaptionId) || 0;
-      const rows = state.sessionTranscript.filter(
-        (row) => (Number(row.captionId) || 0) > processedId
-      );
-      if (rows.length === 0) return null;
-
-      const lastCaptionId = rows.reduce(
-        (max, row) => Math.max(max, Number(row.captionId) || 0),
-        processedId
-      );
-      const recentResponses = state.sessionAiEvents
-        .filter((event) => event.kind === 'response' && event.t > (state.sessionMemoryUpdatedAt || 0))
-        .slice(-C.SESSION_MEMORY_UPDATE_QUESTIONS)
-        .map((event) => event.text.slice(0, 1200));
-
-      return {
-        previousMemory: String(state.sessionMemory || ''),
-        transcript: formatTranscriptLines(rows).slice(-C.SESSION_RECENT_MAX_CHARS * 2),
-        recentResponses,
-        lastCaptionId
-      };
-    }
-
-    function applyStructuredMemory(memory, lastCaptionId) {
-      state.sessionMemory = String(memory || '').slice(0, C.SESSION_MEMORY_MAX_CHARS);
-      state.sessionMemoryProcessedCaptionId = lastCaptionId ?? state.sessionMemoryProcessedCaptionId;
-      state.sessionMemoryUpdatedAt = Date.now();
-      state.sessionQuestionsSinceMemoryUpdate = 0;
-      flushPersistSessionLog();
     }
 
     function recordIaActivation(promptText) {
@@ -309,7 +253,6 @@
         text: String(text).slice(0, C.SESSION_PROMPT_STORE_MAX)
       });
       if (state.sessionAiEvents.length > C.SESSION_AI_EVENTS_MAX) state.sessionAiEvents.shift();
-      state.sessionQuestionsSinceMemoryUpdate = (state.sessionQuestionsSinceMemoryUpdate || 0) + 1;
       flushPersistSessionLog();
     }
 
@@ -374,8 +317,9 @@
         const role = l.role === 'me' ? 'TÚ' : 'ENTREVISTADOR';
         lines.push(`[${iso(l.t)}] [${role}] ${l.speaker || '?'}: ${l.text}`);
       }
-      if (state.sessionMemory) {
-        lines.push('', '--- Memoria consolidada de la entrevista ---', '', state.sessionMemory);
+      const memorySnapshot = _modules.memoryLedger?.formatMarkdown?.();
+      if (memorySnapshot) {
+        lines.push('', '--- Memoria verificable de la entrevista ---', '', memorySnapshot.trim());
       }
       lines.push('', '--- Eventos IA ---', '');
       for (const e of state.sessionAiEvents) {
@@ -425,9 +369,7 @@
       restoreSessionLog,
       flushPersistSessionLog,
       findLastUserSpokeIndex,
-      buildSessionDigestForPrompt,
-      getPendingMemoryUpdate,
-      applyStructuredMemory,
+      buildTranscriptContextForPrompt,
       recordIaActivation,
       recordIaResponse,
       recordApiUsage,

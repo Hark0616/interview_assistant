@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.7.0
+
+- La memoria semántica se separa del log en un ledger por `meetingSessionId`, con migración automática de la memoria textual de 1.6.0.
+- Un proceso cancelable de baja prioridad extrae operaciones JSON únicamente de captions con rol y procedencia; las sugerencias de IA nunca se usan como hechos.
+- El modelo de memoria puede configurarse en el popup y reutiliza el proveedor/API key principal; si queda vacío usa el modelo principal.
+- El contexto prioriza bullets confirmados, fijados y relevantes dentro de un presupuesto estable, seguido de ventana literal y fragmentos de transcripción.
+- Overlay y panel incluyen una vista plegable para editar, fijar, retirar y exportar la memoria en JSON o Markdown.
+- El uso del actualizador se registra como `memory-ledger`; una petición principal aborta la actualización sin avanzar el cursor de captions.
+
 ## 1.6.0
 
 - OpenRouter registra por sesión requests, tokens de entrada/salida, razonamiento, caché y costo real; el resumen aparece en overlay, panel y exportación.

@@ -129,6 +129,13 @@
   margin: 0 14px;
 }
 
+#ia-memory-section {
+  flex-shrink: 0;
+  padding: 6px 14px 7px;
+  border-top: 1px solid var(--ia-border-subtle);
+  background: rgba(0, 0, 0, 0.1);
+}
+
 /* ── Suggestion section ── */
 #ia-suggestion-section {
   padding: 12px 14px 14px 12px;

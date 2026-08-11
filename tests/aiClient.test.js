@@ -54,13 +54,15 @@ describe('aiClient.js', () => {
     modules = {
       sessionLog: {
         findLastUserSpokeIndex: vi.fn(() => -1),
-        buildSessionDigestForPrompt: vi.fn(() => ''),
-        getPendingMemoryUpdate: vi.fn(() => null),
-        applyStructuredMemory: vi.fn(),
         recordIaActivation: vi.fn(),
         recordIaResponse: vi.fn(),
         recordApiUsage: vi.fn(),
         recordIaError: vi.fn()
+      },
+      memoryLedger: {
+        buildContext: vi.fn(() => ''),
+        cancelUpdate: vi.fn(),
+        noteResponseCompleted: vi.fn()
       },
       ui: {
         updateStatus: vi.fn(),
@@ -105,6 +107,7 @@ describe('aiClient.js', () => {
 
     expect(modules.ui.displaySuggestion).toHaveBeenCalledWith('Estoy bien');
     expect(state.suggestionHistory[0].answer).toBe('Estoy bien');
+    expect(modules.memoryLedger.noteResponseCompleted).toHaveBeenCalledOnce();
   });
 
   it('debería poner en cola el contexto que llega durante una respuesta', async () => {

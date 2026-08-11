@@ -8,7 +8,7 @@
   window.__ia = window.__ia || {};
 
   window.__ia.createOverlayUI = function (state, C, modules) {
-    const { escapeHtml, FONT_LEVELS, renderCaptionLines } = window.__ia.utils;
+    const { escapeHtml, FONT_LEVELS, renderCaptionLines, renderMemoryBullets } = window.__ia.utils;
 
     let transcriptScrollProgrammatic = false;
     let panelUpdateTimer = null;
@@ -39,6 +39,7 @@
           statusState: document.getElementById('ia-status-dot')?.className?.match(/ia-dot-(\w+)/)?.[1] || 'idle',
           transcript: state.captionBuffer.slice(-5).map(c => ({ role: c.role, speaker: c.speaker, text: c.text })),
           suggestion: lastSuggestionForPanel,
+          memory: modules.memoryLedger.getViewState(),
           myName: state.config?.myName || '',
           hasConfig: !!state.config?.apiKey,
           ...partial,
@@ -125,6 +126,20 @@
       sendPanelUpdate();
     }
 
+    function renderMemory() {
+      const view = modules.memoryLedger.getViewState();
+      const list = document.getElementById('ia-memory-list');
+      const count = document.getElementById('ia-memory-count');
+      const status = document.getElementById('ia-memory-status');
+      if (list) list.innerHTML = renderMemoryBullets(view);
+      if (count) count.textContent = String(view.count || 0);
+      if (status) {
+        status.textContent = view.status?.text || 'Memoria lista';
+        status.dataset.state = view.status?.status || 'idle';
+      }
+      sendPanelUpdate({ memory: view });
+    }
+
     function highlightManualBtn() {
       const btn = document.getElementById('ia-send-btn');
       if (btn) btn.classList.add('ia-send-pulse');
@@ -140,7 +155,8 @@
       state.isActive = !state.isActive;
       if (state.isActive) {
         const btn = document.getElementById('ia-activate-btn');
-        modules.sessionLog.ensureSessionLog();
+        const created = modules.sessionLog.ensureSessionLog();
+        if (created) void modules.memoryLedger.resetForSession();
         updateUsage();
         modules.captionCapture.startCaptionObserver();
         if (btn) { btn.textContent = 'Detener'; btn.disabled = false; btn.classList.add('active'); }
@@ -343,6 +359,45 @@
       }
     }
 
+    function setupMemoryEvents() {
+      const section = document.getElementById('ia-memory-section');
+      const collapseBtn = document.getElementById('ia-memory-collapse-btn');
+      const applyCollapse = () => {
+        section?.classList.toggle('ia-memory-collapsed', state.memoryCollapsed);
+        if (collapseBtn) {
+          collapseBtn.textContent = state.memoryCollapsed ? '▸' : '▾';
+          collapseBtn.setAttribute('aria-expanded', state.memoryCollapsed ? 'false' : 'true');
+        }
+      };
+      applyCollapse();
+      collapseBtn?.addEventListener('click', () => {
+        state.memoryCollapsed = !state.memoryCollapsed;
+        applyCollapse();
+      });
+      document.getElementById('ia-memory-export-json')?.addEventListener('click', () => {
+        modules.memoryLedger.exportData('json');
+      });
+      document.getElementById('ia-memory-export-md')?.addEventListener('click', () => {
+        modules.memoryLedger.exportData('md');
+      });
+      document.getElementById('ia-memory-list')?.addEventListener('click', (event) => {
+        const button = event.target.closest('[data-memory-action]');
+        const row = event.target.closest('[data-memory-id]');
+        if (!button || !row) return;
+        const id = row.dataset.memoryId;
+        const action = button.dataset.memoryAction;
+        if (action === 'edit') {
+          const current = modules.memoryLedger.getViewState().bullets.find((bullet) => bullet.id === id);
+          const next = window.prompt('Editar bullet de memoria', current?.text || '');
+          if (next != null) modules.memoryLedger.editBullet(id, next);
+        } else if (action === 'pin') {
+          modules.memoryLedger.togglePin(id);
+        } else if (action === 'retire') {
+          modules.memoryLedger.retireBullet(id);
+        }
+      });
+    }
+
     function setupHeaderEvents() {
       document.getElementById('ia-close-btn').onclick = () => hideOverlay();
 
@@ -405,6 +460,7 @@
       setupSuggestionEvents();
       setupControlEvents();
       setupNoteEvents();
+      setupMemoryEvents();
       setupHeaderEvents();
       setupFooterEvents();
       setupStealthEvents();
@@ -466,6 +522,22 @@
               <span>Generando respuesta...</span>
             </div>
           </div>
+
+          <div id="ia-memory-section" class="ia-memory-collapsed">
+            <div class="ia-section-label ia-memory-label-row">
+              <button type="button" id="ia-memory-collapse-btn" class="ia-transcript-collapse-btn"
+                aria-expanded="false" aria-controls="ia-memory-panel">▸</button>
+              <span>Memoria (<span id="ia-memory-count">0</span>)</span>
+              <span id="ia-memory-status" class="ia-memory-status">Memoria lista</span>
+              <div class="ia-memory-export-actions">
+                <button type="button" id="ia-memory-export-json">JSON</button>
+                <button type="button" id="ia-memory-export-md">MD</button>
+              </div>
+            </div>
+            <div id="ia-memory-panel" class="ia-memory-panel">
+              <div id="ia-memory-list" class="ia-memory-list"></div>
+            </div>
+          </div>
         </div>
 
         <div id="ia-controls">
@@ -504,6 +576,7 @@
       document.body.appendChild(state.overlay);
       setupOverlayEvents();
       makeDraggable(state.overlay);
+      renderMemory();
     }
 
     // Latido periódico para mantener vivo el canal con el panel flotante y evitar falsas desconexiones.
@@ -522,6 +595,7 @@
       setLoadingState,
       updateStatus,
       updateUsage,
+      renderMemory,
       highlightManualBtn,
       sendPanelUpdate,
       // APIs para comandos del panel (sin simular clics DOM)

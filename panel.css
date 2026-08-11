@@ -167,6 +167,13 @@ body {
   overflow: hidden;
 }
 
+.ia-panel-memory-section {
+  flex-shrink: 0;
+  padding: 6px 14px 7px;
+  border-top: 1px solid var(--ia-border-subtle);
+  background: rgba(0, 0, 0, 0.1);
+}
+
 .ia-panel-suggestion {
   flex: 1;
   overflow-y: auto;

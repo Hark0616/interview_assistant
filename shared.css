@@ -272,6 +272,109 @@
   animation: ia-send-glow 1.2s ease-in-out infinite;
 }
 
+/* ── Memoria incremental (overlay + panel) ── */
+.ia-memory-label-row {
+  margin-bottom: 0;
+  min-height: 24px;
+}
+
+.ia-memory-status {
+  color: var(--ia-text-dim);
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ia-memory-status[data-state="updating"] { color: var(--ia-accent-light); }
+.ia-memory-status[data-state="error"] { color: var(--ia-error-light); }
+
+.ia-memory-export-actions {
+  display: flex;
+  gap: 3px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.ia-memory-panel {
+  margin-top: 5px;
+  max-height: 170px;
+  overflow-y: auto;
+}
+
+.ia-memory-collapsed .ia-memory-panel { display: none; }
+
+.ia-memory-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.ia-memory-empty {
+  color: var(--ia-text-muted);
+  font-size: 11px;
+  font-style: italic;
+  padding: 5px 2px;
+}
+
+.ia-memory-category {
+  color: var(--ia-accent-light);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.45px;
+  margin: 3px 0;
+  text-transform: uppercase;
+}
+
+.ia-memory-bullet {
+  background: rgba(255,255,255,0.035);
+  border-left: 2px solid rgba(99,102,241,0.35);
+  border-radius: 5px;
+  padding: 5px 6px;
+}
+
+.ia-memory-text {
+  color: var(--ia-text-secondary);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.ia-memory-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  color: var(--ia-text-dim);
+  font-size: 9px;
+  margin-top: 4px;
+}
+
+.ia-memory-meta > span {
+  background: rgba(255,255,255,0.04);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+
+.ia-memory-actions {
+  display: flex;
+  gap: 3px;
+  margin-left: auto;
+}
+
+.ia-memory-actions button {
+  background: transparent;
+  border: 0;
+  color: var(--ia-text-muted);
+  cursor: pointer;
+  font-size: 9px;
+  padding: 1px 3px;
+}
+
+.ia-memory-actions button:hover { color: var(--ia-accent-light); }
+
 @keyframes ia-send-glow {
   0%, 100% { box-shadow: 0 0 4px rgba(99,102,241,0.4); }
   50%       { box-shadow: 0 0 12px rgba(99,102,241,0.8); }

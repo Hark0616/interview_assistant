@@ -62,6 +62,22 @@
         <span>Generando respuesta...</span>
       </div>
     </div>
+
+    <div class="ia-panel-memory-section ia-memory-collapsed" id="ia-panel-memory-section">
+      <div class="ia-section-label ia-memory-label-row">
+        <button type="button" id="ia-panel-memory-collapse" class="ia-transcript-collapse-btn"
+          aria-expanded="false">▸</button>
+        <span>Memoria (<span id="ia-panel-memory-count">0</span>)</span>
+        <span id="ia-panel-memory-status" class="ia-memory-status">Memoria lista</span>
+        <div class="ia-memory-export-actions">
+          <button type="button" id="ia-panel-memory-json">JSON</button>
+          <button type="button" id="ia-panel-memory-md">MD</button>
+        </div>
+      </div>
+      <div class="ia-memory-panel">
+        <div id="ia-panel-memory-list" class="ia-memory-list"></div>
+      </div>
+    </div>
   </div>
 
   <div class="ia-panel-controls" id="ia-panel-controls">

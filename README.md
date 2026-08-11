@@ -86,8 +86,10 @@ Si quieres una copia de las claves en un **archivo en tu disco** (o varios PCs v
 - Todo lo que digan **los entrevistadores** se marca como contexto para generar respuestas
 - Lo que **tú dices** se registra para que la IA tenga contexto completo, pero NO genera sugerencia cuando hablas tú
 - Las sugerencias son en **primera persona** para que puedas usarlas directamente
-- La transcripción completa se conserva localmente; cada petición envía una memoria estructurada, una ventana reciente y hasta cuatro fragmentos anteriores relevantes.
-- Cada cinco respuestas o diez minutos se actualiza la memoria consolidada, manteniendo estable el tamaño del prompt en entrevistas largas.
+- La transcripción completa se conserva localmente; cada sesión mantiene además un ledger semántico separado (`iaInterviewMemoryLedger:<sessionId>`) con bullets y fuentes verificables.
+- Cada cinco respuestas o, como máximo, diez minutos después de existir captions pendientes, un proceso de baja prioridad actualiza el ledger usando solo subtítulos crudos, nunca sugerencias de IA.
+- El contexto prioriza memoria fijada/confirmada y bullets relevantes dentro de un presupuesto aproximado de 12.000 caracteres, seguido de ventana literal y fragmentos anteriores.
+- La memoria se puede revisar, editar, fijar, retirar y exportar como JSON o Markdown desde el overlay o el panel separado.
 - Con OpenRouter, el pie del overlay muestra requests, tokens y costo real acumulado de la sesión.
 
 ---

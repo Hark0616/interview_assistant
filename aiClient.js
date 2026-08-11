@@ -7,8 +7,6 @@
   window.__ia = window.__ia || {};
 
   window.__ia.createAiClient = function (state, C, modules) {
-    let memoryUpdateInFlight = false;
-
     function findLastIndex(arr, predicate) {
       for (let i = arr.length - 1; i >= 0; i--) {
         if (predicate(arr[i])) return i;
@@ -235,7 +233,7 @@
         .join(' ')
         .trim();
 
-      const digest = modules.sessionLog.buildSessionDigestForPrompt(latestQuestion || conversationText);
+      const digest = modules.memoryLedger.buildContext(latestQuestion || conversationText);
       const userPayload = digest
         ? `[Registro previo de la reunión (contexto; no lo repitas literalmente).\n${digest}]\n\n--- Mensaje actual (tramo desde tu última intervención) ---\n\n${conversationText}`
         : conversationText;
@@ -246,52 +244,6 @@
     function buildMessages(systemPrompt, userPayload) {
       void systemPrompt;
       return [{ role: 'user', content: userPayload }];
-    }
-
-    async function maybeUpdateStructuredMemory() {
-      if (memoryUpdateInFlight || !state.config?.apiKey) return;
-      const pending = modules.sessionLog.getPendingMemoryUpdate();
-      if (!pending) return;
-
-      memoryUpdateInFlight = true;
-      try {
-        const previous = pending.previousMemory || '(todavía no existe memoria consolidada)';
-        const response = await sendMessageAsync({
-          type: 'GET_AI_SUGGESTION',
-          data: {
-            provider: state.config.provider || 'gemini',
-            apiKey: state.config.apiKey,
-            model: state.config.model,
-            ...buildProviderOptions({ maxCompletionTokens: 1200, temperature: 0.2 }),
-            systemPrompt:
-              'Mantén memoria factual y compacta de una entrevista. No inventes. ' +
-              'Responde solo con la memoria actualizada, sin introducción.',
-            messages: [{
-              role: 'user',
-              content: `Actualiza la memoria acumulada usando únicamente el bloque nuevo.\n\n` +
-                `Usa estas secciones fijas:\n` +
-                `TEMAS Y PREGUNTAS CUBIERTOS\nHISTORIAS STAR UTILIZADAS\n` +
-                `TECNOLOGÍAS, MÉTRICAS Y EXPERIENCIAS MENCIONADAS\n` +
-                `AFIRMACIONES Y COMPROMISOS DEL CANDIDATO\nFORTALEZAS Y VACÍOS\n` +
-                `PREGUNTAS O FOLLOW-UPS PENDIENTES\nIDIOMA, TONO Y ESTILO\n\n` +
-                `MEMORIA ANTERIOR:\n${previous}\n\n` +
-                `TRANSCRIPCIÓN NUEVA:\n${pending.transcript}\n\n` +
-                `RESPUESTAS SUGERIDAS RECIENTES:\n${pending.recentResponses.join('\n---\n') || '(ninguna)'}`
-            }]
-          }
-        });
-
-        if (response?.success && response.suggestion) {
-          modules.sessionLog.recordApiUsage(response.usage, 'memory-summary');
-          modules.sessionLog.applyStructuredMemory(response.suggestion, pending.lastCaptionId);
-        } else if (response?.error) {
-          modules.sessionLog.recordIaError(`No se pudo actualizar memoria: ${response.error}`);
-        }
-      } catch (err) {
-        modules.sessionLog.recordIaError(`No se pudo actualizar memoria: ${err.message}`);
-      } finally {
-        memoryUpdateInFlight = false;
-      }
     }
 
     function handleSuggestionSuccess(response, latestQuestion, recentLines) {
@@ -306,6 +258,7 @@
 
       modules.sessionLog.recordApiUsage(response.usage, 'suggestion');
       modules.sessionLog.recordIaResponse(suggestionText);
+      modules.memoryLedger.noteResponseCompleted();
 
       const historyQuestion =
         latestQuestion ||
@@ -320,7 +273,6 @@
       }
 
       modules.ui.displaySuggestion(suggestionText);
-      void maybeUpdateStructuredMemory();
     }
 
     function finishCurrentRequest(port) {
@@ -372,6 +324,9 @@
         schedulePendingRequest();
         return;
       }
+
+      // La generación principal siempre tiene prioridad sobre el proceso de memoria.
+      modules.memoryLedger.cancelUpdate('Nueva sugerencia principal.');
 
       const recentLines = getContextLinesForAI();
       if (recentLines.length === 0) {

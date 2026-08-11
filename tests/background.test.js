@@ -19,7 +19,7 @@ describe('background.js - OpenRouter', () => {
     const source = fs.readFileSync(path.resolve(__dirname, '../background.js'), 'utf8');
     eval(`${source}\n;globalThis.__backgroundTest = {\n` +
       `normalizeUsage, getRetryDelayMs, validateApproximateContext, ` +
-      `handleAISuggestionStream, PROVIDERS\n` +
+      `handleAISuggestionStream, cancelMemoryRequest, activeMemoryRequests, PROVIDERS\n` +
       `};`);
     helpers = global.__backgroundTest;
   });
@@ -66,6 +66,16 @@ describe('background.js - OpenRouter', () => {
   it('respeta Retry-After expresado en segundos', () => {
     const response = { headers: { get: vi.fn(() => '12') } };
     expect(helpers.getRetryDelayMs(response, 500)).toBe(12000);
+  });
+
+  it('cancela por sesión una actualización de memoria de baja prioridad', () => {
+    const controller = new AbortController();
+    helpers.activeMemoryRequests.set('meeting-123', { controller, requestId: 'memory-1' });
+
+    expect(helpers.cancelMemoryRequest('meeting-123', 'Petición principal')).toBe(true);
+    expect(controller.signal.aborted).toBe(true);
+    expect(controller.signal.reason.message).toBe('Petición principal');
+    expect(helpers.activeMemoryRequests.has('meeting-123')).toBe(false);
   });
 
   it('rechaza contextos estimados que no caben en el modelo', () => {
