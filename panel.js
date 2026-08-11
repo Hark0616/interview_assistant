@@ -41,6 +41,7 @@
     memoryList:       document.getElementById('ia-panel-memory-list'),
     memoryJson:       document.getElementById('ia-panel-memory-json'),
     memoryMd:         document.getElementById('ia-panel-memory-md'),
+    memoryMode:       document.getElementById('ia-panel-memory-mode'),
   };
 
   // ── Estado local del panel ──
@@ -165,6 +166,9 @@
       el.memoryStatus.textContent = memory.status?.text || 'Memoria lista';
       el.memoryStatus.dataset.state = memory.status?.status || 'idle';
     }
+    if (el.memoryMode && document.activeElement !== el.memoryMode) {
+      el.memoryMode.value = memory.mode || 'automatic';
+    }
   }
 
   // ── Event handlers ──
@@ -183,6 +187,9 @@
     el.downloadLog.addEventListener('click', () => sendCommand('downloadLog'));
     el.memoryJson?.addEventListener('click', () => sendCommand('exportMemory', { format: 'json' }));
     el.memoryMd?.addEventListener('click', () => sendCommand('exportMemory', { format: 'md' }));
+    el.memoryMode?.addEventListener('change', () => {
+      sendCommand('setMemoryMode', { mode: el.memoryMode.value });
+    });
 
     el.memoryCollapse?.addEventListener('click', () => {
       const collapsed = el.memorySection.classList.toggle('ia-memory-collapsed');

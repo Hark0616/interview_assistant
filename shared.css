@@ -279,6 +279,8 @@
 }
 
 .ia-memory-status {
+  flex: 1;
+  min-width: 0;
   color: var(--ia-text-dim);
   font-size: 9px;
   font-weight: 500;
@@ -291,6 +293,21 @@
 
 .ia-memory-status[data-state="updating"] { color: var(--ia-accent-light); }
 .ia-memory-status[data-state="error"] { color: var(--ia-error-light); }
+
+.ia-memory-mode {
+  width: auto;
+  max-width: 94px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--ia-border);
+  border-radius: var(--ia-r-control);
+  color: var(--ia-text-secondary);
+  font: inherit;
+  font-size: 9px;
+  padding: 2px 4px;
+  text-transform: none;
+}
+
+.ia-memory-mode option { background: var(--ia-bg); }
 
 .ia-memory-export-actions {
   display: flex;

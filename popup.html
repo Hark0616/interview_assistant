@@ -295,6 +295,16 @@
       <div class="hint">Usa el mismo proveedor y API key. Por defecto reutiliza el modelo principal.</div>
     </div>
 
+    <div class="form-group">
+      <label>Memoria durante la entrevista</label>
+      <select id="memoryMode">
+        <option value="off">Desactivada — sin consumo adicional</option>
+        <option value="existing">Solo lectura — usa bullets guardados</option>
+        <option value="automatic" selected>Automática — actualiza y usa memoria</option>
+      </select>
+      <div class="hint">También puedes cambiarla al instante desde el overlay o el panel separado.</div>
+    </div>
+
     <div class="form-group" id="openrouter-routing-row" style="display:none">
       <label>Enrutamiento OpenRouter</label>
       <select id="openRouterRouting">

@@ -21,6 +21,7 @@
   ]);
   const INTERVIEWER_SOURCE_CATEGORIES = new Set(['interviewer-context', 'pending']);
   const CONFIDENCES = new Set(['confirmed', 'inferred']);
+  const MEMORY_MODES = new Set(['off', 'existing', 'automatic']);
   const MAX_TEXT_CHARS = 1000;
   const MAX_SOURCE_IDS = 20;
   const MAX_OPERATIONS = 80;
@@ -47,6 +48,28 @@
         state.memoryLedger = emptyLedger();
       }
       return state.memoryLedger;
+    }
+
+    function getMode() {
+      const configured = state.config?.memoryMode;
+      return MEMORY_MODES.has(configured) ? configured : 'automatic';
+    }
+
+    function latestCaptionId() {
+      return state.sessionTranscript.reduce(
+        (max, row) => Math.max(max, Number(row.captionId) || 0),
+        0
+      );
+    }
+
+    function skipPendingWhilePaused() {
+      if (!state.meetingSessionId) return;
+      const ledger = ensureLedger();
+      const latest = latestCaptionId();
+      if (latest > (Number(ledger.processedCaptionId) || 0)) ledger.processedCaptionId = latest;
+      ledger.pendingSince = null;
+      ledger.questionsSinceUpdate = 0;
+      schedulePersist();
     }
 
     function storageKey(sessionId = state.meetingSessionId) {
@@ -246,6 +269,10 @@
 
     function notifyTranscriptChanged() {
       if (!state.meetingSessionId) return;
+      if (getMode() !== 'automatic') {
+        skipPendingWhilePaused();
+        return;
+      }
       const ledger = ensureLedger();
       if (pendingRows().length === 0) {
         ledger.pendingSince = null;
@@ -259,6 +286,10 @@
     }
 
     function noteResponseCompleted() {
+      if (getMode() !== 'automatic') {
+        skipPendingWhilePaused();
+        return;
+      }
       const ledger = ensureLedger();
       ledger.questionsSinceUpdate += 1;
       schedulePersist();
@@ -270,6 +301,7 @@
     }
 
     function scheduleUpdate(delayMs = C.MEMORY_UPDATE_DELAY_MS) {
+      if (getMode() !== 'automatic') return;
       if (updateTimer) clearTimeout(updateTimer);
       updateTimer = setTimeout(() => {
         updateTimer = null;
@@ -293,6 +325,34 @@
         cancellation?.catch?.(() => {});
       } catch { /* el service worker puede estar reiniciándose */ }
       setStatus('pending', 'Actualización pospuesta');
+    }
+
+    function setMode(mode) {
+      const nextMode = MEMORY_MODES.has(mode) ? mode : 'automatic';
+      cancelUpdate('Modo de memoria actualizado.');
+      if (!state.config) state.config = {};
+      state.config.memoryMode = nextMode;
+      if (nextMode !== 'automatic') skipPendingWhilePaused();
+      else notifyTranscriptChanged();
+      chrome.storage.local.get(['iaConfig'], (result) => {
+        chrome.storage.local.set({
+          iaConfig: { ...(result.iaConfig || {}), memoryMode: nextMode }
+        });
+      });
+      const labels = {
+        off: 'Memoria desactivada',
+        existing: 'Solo memoria existente',
+        automatic: 'Memoria automática'
+      };
+      setStatus(nextMode === 'automatic' ? 'idle' : 'paused', labels[nextMode]);
+      return nextMode;
+    }
+
+    function applyConfiguredMode() {
+      cancelUpdate('Configuración de memoria actualizada.');
+      if (getMode() !== 'automatic') skipPendingWhilePaused();
+      else notifyTranscriptChanged();
+      render();
     }
 
     function tokenize(text) {
@@ -499,7 +559,9 @@
     }
 
     async function requestUpdate() {
-      if (activeRequestId || !state.config?.apiKey || !state.meetingSessionId) return false;
+      if (getMode() !== 'automatic' || activeRequestId || !state.config?.apiKey || !state.meetingSessionId) {
+        return false;
+      }
       const rows = pendingRows();
       if (rows.length === 0) return false;
       const ledger = ensureLedger();
@@ -647,7 +709,7 @@
 
     function buildContext(queryText = '') {
       const sections = [];
-      const ledgerBlock = buildLedgerBlock(queryText);
+      const ledgerBlock = getMode() === 'off' ? '' : buildLedgerBlock(queryText);
       if (ledgerBlock) sections.push(`MEMORIA VERIFICABLE DE LA ENTREVISTA:\n${ledgerBlock}`);
       const transcriptContext = modules.sessionLog.buildTranscriptContextForPrompt(queryText);
       if (transcriptContext) sections.push(transcriptContext);
@@ -659,6 +721,7 @@
         bullets: activeBullets().map((bullet) => ({ ...bullet })),
         count: activeBullets().length,
         status: state.memoryLedgerStatus || { status: 'idle', text: 'Memoria lista' },
+        mode: getMode(),
         categoryLabels: { ...CATEGORY_LABELS }
       };
     }
@@ -710,6 +773,8 @@
       noteResponseCompleted,
       requestUpdate,
       cancelUpdate,
+      setMode,
+      applyConfiguredMode,
       parseOperations,
       validateOperations,
       applyValidatedOperations,

@@ -131,12 +131,14 @@
       const list = document.getElementById('ia-memory-list');
       const count = document.getElementById('ia-memory-count');
       const status = document.getElementById('ia-memory-status');
+      const mode = document.getElementById('ia-memory-mode');
       if (list) list.innerHTML = renderMemoryBullets(view);
       if (count) count.textContent = String(view.count || 0);
       if (status) {
         status.textContent = view.status?.text || 'Memoria lista';
         status.dataset.state = view.status?.status || 'idle';
       }
+      if (mode && document.activeElement !== mode) mode.value = view.mode || 'automatic';
       sendPanelUpdate({ memory: view });
     }
 
@@ -380,6 +382,9 @@
       document.getElementById('ia-memory-export-md')?.addEventListener('click', () => {
         modules.memoryLedger.exportData('md');
       });
+      document.getElementById('ia-memory-mode')?.addEventListener('change', (event) => {
+        modules.memoryLedger.setMode(event.target.value);
+      });
       document.getElementById('ia-memory-list')?.addEventListener('click', (event) => {
         const button = event.target.closest('[data-memory-action]');
         const row = event.target.closest('[data-memory-id]');
@@ -528,6 +533,11 @@
               <button type="button" id="ia-memory-collapse-btn" class="ia-transcript-collapse-btn"
                 aria-expanded="false" aria-controls="ia-memory-panel">▸</button>
               <span>Memoria (<span id="ia-memory-count">0</span>)</span>
+              <select id="ia-memory-mode" class="ia-memory-mode" title="Consumo y uso de memoria">
+                <option value="off">Desactivada</option>
+                <option value="existing">Solo lectura</option>
+                <option value="automatic">Automática</option>
+              </select>
               <span id="ia-memory-status" class="ia-memory-status">Memoria lista</span>
               <div class="ia-memory-export-actions">
                 <button type="button" id="ia-memory-export-json">JSON</button>

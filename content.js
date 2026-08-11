@@ -208,6 +208,7 @@
         const oldJob = state.config?.jobDescription || '';
         const oldCompany = state.config?.company || '';
         loadConfig((newCfg) => {
+          modules.memoryLedger.applyConfiguredMode();
           const cvChanged = (newCfg?.cvProfile || '') !== oldCv;
           const jobChanged = (newCfg?.jobDescription || '') !== oldJob;
           const companyChanged = (newCfg?.company || '') !== oldCompany;
@@ -320,6 +321,9 @@
         break;
       case 'exportMemory':
         modules.memoryLedger.exportData(data?.format || 'json');
+        break;
+      case 'setMemoryMode':
+        modules.memoryLedger.setMode(data?.mode);
         break;
       case 'dockBack':
         state.panelActive = false;

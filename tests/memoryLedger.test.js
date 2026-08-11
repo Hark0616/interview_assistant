@@ -211,6 +211,48 @@ describe('memoryLedger.js', () => {
     expect(data.provider).toBe('openrouter');
   });
 
+  it('permite apagar el ledger o usarlo en solo lectura sin llamadas adicionales', async () => {
+    await ledger.resetForSession();
+    state.sessionTranscript = [caption(1, 'me')];
+    const valid = ledger.validateOperations([opAdd()], state.sessionTranscript);
+    ledger.applyValidatedOperations(valid, state.sessionTranscript, 1);
+
+    ledger.setMode('off');
+    expect(ledger.buildContext('OAuth')).not.toContain('MEMORIA VERIFICABLE');
+    for (let i = 0; i < 5; i++) ledger.noteResponseCompleted();
+    expect(await ledger.requestUpdate()).toBe(false);
+    expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'GET_MEMORY_LEDGER_UPDATE' }), expect.anything()
+    );
+
+    ledger.setMode('existing');
+    expect(ledger.buildContext('OAuth')).toContain('Implementé OAuth en producción');
+    expect(await ledger.requestUpdate()).toBe(false);
+  });
+
+  it('omite captions acumulados mientras está apagada al volver a automática', async () => {
+    await ledger.resetForSession();
+    ledger.setMode('off');
+    state.sessionTranscript = [caption(10, 'interviewer', 'Pregunta durante entrevista corta')];
+    ledger.notifyTranscriptChanged();
+    expect(state.memoryLedger.processedCaptionId).toBe(10);
+
+    ledger.setMode('automatic');
+    state.sessionTranscript.push(caption(11, 'me', 'Respuesta después de activar memoria'));
+    for (let i = 0; i < 5; i++) ledger.noteResponseCompleted();
+    let prompt;
+    sendMessageImpl = (payload, callback) => {
+      if (payload.type === 'GET_MEMORY_LEDGER_UPDATE') {
+        prompt = payload.data.messages[0].content;
+        callback({ success: true, suggestion: JSON.stringify({ operations: [] }) });
+      }
+    };
+
+    expect(await ledger.requestUpdate()).toBe(true);
+    expect(prompt).toContain('Respuesta después de activar memoria');
+    expect(prompt).not.toContain('Pregunta durante entrevista corta');
+  });
+
   it('no avanza el cursor con JSON inválido', async () => {
     await ledger.resetForSession();
     state.sessionTranscript = [caption(1, 'me')];

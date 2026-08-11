@@ -49,7 +49,7 @@ describe('UI de memoria', () => {
     const memoryLedger = {
       getViewState: vi.fn(() => memoryView),
       editBullet: vi.fn(), togglePin: vi.fn(), retireBullet: vi.fn(), exportData: vi.fn(),
-      resetForSession: vi.fn()
+      resetForSession: vi.fn(), setMode: vi.fn()
     };
     const modules = {
       memoryLedger,
@@ -78,6 +78,10 @@ describe('UI de memoria', () => {
     document.getElementById('ia-memory-export-md').click();
     expect(memoryLedger.exportData).toHaveBeenCalledWith('json');
     expect(memoryLedger.exportData).toHaveBeenCalledWith('md');
+    const mode = document.getElementById('ia-memory-mode');
+    mode.value = 'off';
+    mode.dispatchEvent(new Event('change'));
+    expect(memoryLedger.setMode).toHaveBeenCalledWith('off');
   });
 
   it('renderiza el ledger recibido en el panel y retransmite sus comandos', () => {
@@ -112,6 +116,9 @@ describe('UI de memoria', () => {
     vi.spyOn(window, 'prompt').mockReturnValue('Editado desde panel');
     document.querySelector('#ia-panel-memory-list [data-memory-action="edit"]').click();
     document.getElementById('ia-panel-memory-md').click();
+    const mode = document.getElementById('ia-panel-memory-mode');
+    mode.value = 'existing';
+    mode.dispatchEvent(new Event('change'));
     const commands = chrome.runtime.sendMessage.mock.calls.map(([message]) => message);
     expect(commands).toContainEqual({
       type: 'IA_PANEL_COMMAND', command: 'editMemoryBullet',
@@ -119,6 +126,9 @@ describe('UI de memoria', () => {
     });
     expect(commands).toContainEqual({
       type: 'IA_PANEL_COMMAND', command: 'exportMemory', data: { format: 'md' }
+    });
+    expect(commands).toContainEqual({
+      type: 'IA_PANEL_COMMAND', command: 'setMemoryMode', data: { mode: 'existing' }
     });
   });
 });

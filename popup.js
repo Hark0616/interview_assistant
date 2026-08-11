@@ -308,6 +308,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setValue('vaultToken', cfg.vaultToken || '');
     setValue('openRouterRouting', cfg.openRouterRouting || 'latency');
     setValue('reasoningEffort', cfg.reasoningEffort || 'none');
+    setValue('memoryMode', cfg.memoryMode || 'automatic');
 
     const key = apiKeys[p] || '';
     if (p === 'openrouter') {
@@ -463,6 +464,7 @@ document.addEventListener('DOMContentLoaded', () => {
         modelMetadata,
         memoryModel,
         memoryModelMetadata,
+        memoryMode: getValue('memoryMode') || 'automatic',
         myName: getValue('myName'),
         cvProfile: getValue('cvProfile'),
         jobDescription: getValue('jobDescription'),

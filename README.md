@@ -90,6 +90,7 @@ Si quieres una copia de las claves en un **archivo en tu disco** (o varios PCs v
 - Cada cinco respuestas o, como máximo, diez minutos después de existir captions pendientes, un proceso de baja prioridad actualiza el ledger usando solo subtítulos crudos, nunca sugerencias de IA.
 - El contexto prioriza memoria fijada/confirmada y bullets relevantes dentro de un presupuesto aproximado de 12.000 caracteres, seguido de ventana literal y fragmentos anteriores.
 - La memoria se puede revisar, editar, fijar, retirar y exportar como JSON o Markdown desde el overlay o el panel separado.
+- Durante la entrevista puede ponerse en `Desactivada` (sin llamadas ni contexto del ledger), `Solo lectura` (usa bullets sin actualizarlos) o `Automática`; el cambio está disponible en overlay, panel y popup.
 - Con OpenRouter, el pie del overlay muestra requests, tokens y costo real acumulado de la sesión.
 
 ---

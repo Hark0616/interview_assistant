@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.1
+
+- La memoria puede cambiarse durante la entrevista entre desactivada, solo lectura y automática desde overlay, panel o popup.
+- Al pausar se omiten localmente los captions de ese tramo, evitando una actualización acumulada y costosa al volver a activar el ledger.
+
 ## 1.7.0
 
 - La memoria semántica se separa del log en un ledger por `meetingSessionId`, con migración automática de la memoria textual de 1.6.0.
