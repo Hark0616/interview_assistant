@@ -30,7 +30,8 @@ describe('captionCapture.js - Microsoft Teams Logic', () => {
         pushSessionTranscriptLine: vi.fn(),
         syncSessionTranscriptLast: vi.fn()
       },
-      ui: { updateStatus: vi.fn(), renderTranscript: vi.fn() }
+      ui: { updateStatus: vi.fn(), renderTranscript: vi.fn() },
+      ai: { requestSuggestion: vi.fn() }
     };
 
     const code = fs.readFileSync(path.resolve(__dirname, '../captionCapture.js'), 'utf8');
@@ -128,5 +129,19 @@ describe('captionCapture.js - Microsoft Teams Logic', () => {
     const thirdAttempt = simulateProcess();
     expect(thirdAttempt).toBe(true);
     expect(state.captionBuffer[0].text).toContain('Tengo una pregunta');
+  });
+
+  it('5. Debería encolar contexto aunque la IA siga respondiendo', async () => {
+    state.isLoading = true;
+    state.config.debounceMs = 0;
+
+    captionCapture.onNewCaption({
+      speaker: 'Entrevistador',
+      text: 'Esta es una pregunta suficientemente larga',
+      block: document.createElement('div')
+    });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    expect(modules.ai.requestSuggestion).toHaveBeenCalledTimes(1);
   });
 });

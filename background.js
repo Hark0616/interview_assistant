@@ -4,6 +4,7 @@
 
 importScripts('panelManager.js');
 const DEBUG_PROMPT_LOGS = true;
+const AI_REQUEST_TIMEOUT_MS = 30000;
 
 // Atajo global (configurable en chrome://extensions/shortcuts) → pestaña Meet activa
 chrome.commands.onCommand.addListener((command) => {
@@ -52,13 +53,44 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 });
 
 chrome.runtime.onConnect.addListener((port) => {
-  if (port.name === 'ai-stream') {
-    port.onMessage.addListener((msg) => {
-      if (msg.type === 'GET_AI_SUGGESTION_STREAM') {
-        handleAISuggestionStream(msg.data, port);
-      }
-    });
+  if (port.name !== 'ai-stream') return;
+
+  let activeRequest = null;
+
+  function cancelActiveRequest(reason = 'Solicitud cancelada.') {
+    if (!activeRequest) return;
+    clearTimeout(activeRequest.timeoutId);
+    activeRequest.controller.abort(new Error(reason));
+    activeRequest = null;
   }
+
+  port.onMessage.addListener((msg) => {
+    if (msg.type === 'CANCEL_AI_SUGGESTION_STREAM') {
+      cancelActiveRequest();
+      return;
+    }
+
+    if (msg.type !== 'GET_AI_SUGGESTION_STREAM') return;
+
+    cancelActiveRequest('Solicitud reemplazada por una petición nueva.');
+    const controller = new globalThis.AbortController();
+    const requestRef = {
+      controller,
+      timeoutId: setTimeout(() => {
+        controller.abort(new Error(`La IA tardó más de ${AI_REQUEST_TIMEOUT_MS / 1000} segundos.`));
+      }, AI_REQUEST_TIMEOUT_MS)
+    };
+    activeRequest = requestRef;
+
+    handleAISuggestionStream(msg.data, port, controller.signal).finally(() => {
+      clearTimeout(requestRef.timeoutId);
+      if (activeRequest === requestRef) activeRequest = null;
+    });
+  });
+
+  port.onDisconnect.addListener(() => {
+    cancelActiveRequest('El panel cerró la conexión con la IA.');
+  });
 });
 
 // ── Providers ──
@@ -179,6 +211,23 @@ const PROVIDERS = {
   }
 };
 
+function waitForRetry(ms, signal) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    if (!signal) return;
+
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new Error(signal.reason?.message || 'Solicitud cancelada.'));
+    };
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
 async function fetchWithRetry(url, options, maxRetries = 3, initialDelayMs = 500) {
   let delay = initialDelayMs;
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -194,14 +243,17 @@ async function fetchWithRetry(url, options, maxRetries = 3, initialDelayMs = 500
       }
       
       console.warn(`[background] Intento ${attempt} falló con estado ${response.status}. Reintentando en ${delay}ms...`);
-      await new Promise(resolve => setTimeout(resolve, delay));
+      await waitForRetry(delay, options?.signal);
       delay *= 2;
     } catch (err) {
+      if (options?.signal?.aborted) {
+        throw new Error(options.signal.reason?.message || 'Solicitud cancelada.');
+      }
       if (attempt === maxRetries) {
         throw err;
       }
       console.warn(`[background] Intento ${attempt} falló por error de red: ${err.message}. Reintentando en ${delay}ms...`);
-      await new Promise(resolve => setTimeout(resolve, delay));
+      await waitForRetry(delay, options?.signal);
       delay *= 2;
     }
   }
@@ -209,6 +261,10 @@ async function fetchWithRetry(url, options, maxRetries = 3, initialDelayMs = 500
 
 async function handleAISuggestion({ provider, apiKey, model, systemPrompt, messages }) {
   const prov = PROVIDERS[provider] || PROVIDERS.gemini;
+  const controller = new globalThis.AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort(new Error(`La IA tardó más de ${AI_REQUEST_TIMEOUT_MS / 1000} segundos.`));
+  }, AI_REQUEST_TIMEOUT_MS);
 
   const url = prov.buildUrl(apiKey, model);
   const headers = prov.buildHeaders(apiKey);
@@ -250,23 +306,33 @@ async function handleAISuggestion({ provider, apiKey, model, systemPrompt, messa
     console.groupEnd();
   }
 
-  const response = await fetchWithRetry(url, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body)
-  });
+  try {
+    const response = await fetchWithRetry(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
 
-  if (!response.ok) {
-    const errData = await response.json().catch(() => ({}));
-    const rawMsg = errData.error?.message || '';
-    throw new Error(normalizeProviderError(provider, response.status, rawMsg));
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      const rawMsg = errData.error?.message || '';
+      throw new Error(normalizeProviderError(provider, response.status, rawMsg));
+    }
+
+    const data = await response.json();
+    const text = prov.extractText(data);
+    if (!text) throw new Error('Respuesta vacía del modelo');
+    const truncated = typeof prov.wasTruncated === 'function' && prov.wasTruncated(data);
+    return { text, truncated };
+  } catch (err) {
+    if (controller.signal.aborted) {
+      throw new Error(controller.signal.reason?.message || 'Solicitud cancelada.');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  const data = await response.json();
-  const text = prov.extractText(data);
-  if (!text) throw new Error('Respuesta vacía del modelo');
-  const truncated = typeof prov.wasTruncated === 'function' && prov.wasTruncated(data);
-  return { text, truncated };
 }
 
 /** Orden sugerido en el <select>: alias *-latest, estables 2.5/2.0, resto alfabético. */
@@ -550,7 +616,16 @@ function extractJsonObjectsFromBuffer(bufferStr) {
   return { objects, remaining };
 }
 
-async function handleAISuggestionStream({ provider, apiKey, model, systemPrompt, messages }, port) {
+function postPortMessage(port, message) {
+  try {
+    port.postMessage(message);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function handleAISuggestionStream({ provider, apiKey, model, systemPrompt, messages }, port, signal) {
   const prov = PROVIDERS[provider] || PROVIDERS.gemini;
 
   let url = prov.buildUrl(apiKey, model);
@@ -577,7 +652,8 @@ async function handleAISuggestionStream({ provider, apiKey, model, systemPrompt,
     const response = await fetchWithRetry(url, {
       method: 'POST',
       headers,
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
+      signal
     });
 
     if (!response.ok) {
@@ -589,6 +665,7 @@ async function handleAISuggestionStream({ provider, apiKey, model, systemPrompt,
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
+    let truncated = false;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -603,8 +680,9 @@ async function handleAISuggestionStream({ provider, apiKey, model, systemPrompt,
           try {
             const parsed = JSON.parse(jsonStr);
             const text = parsed.candidates?.[0]?.content?.parts?.[0]?.text || '';
+            if (parsed.candidates?.[0]?.finishReason === 'MAX_TOKENS') truncated = true;
             if (text) {
-              port.postMessage({ type: 'chunk', text });
+              postPortMessage(port, { type: 'chunk', text });
             }
           } catch (e) {
             console.warn('[background] Error al parsear chunk de Gemini:', e);
@@ -622,8 +700,9 @@ async function handleAISuggestionStream({ provider, apiKey, model, systemPrompt,
             try {
               const parsed = JSON.parse(dataStr);
               const text = parsed.choices?.[0]?.delta?.content || '';
+              if (parsed.choices?.[0]?.finish_reason === 'length') truncated = true;
               if (text) {
-                port.postMessage({ type: 'chunk', text });
+                postPortMessage(port, { type: 'chunk', text });
               }
             } catch (e) {
               console.warn('[background] Error al parsear SSE chunk:', e);
@@ -639,8 +718,9 @@ async function handleAISuggestionStream({ provider, apiKey, model, systemPrompt,
         try {
           const parsed = JSON.parse(cleaned.slice(6));
           const text = parsed.choices?.[0]?.delta?.content || '';
+          if (parsed.choices?.[0]?.finish_reason === 'length') truncated = true;
           if (text) {
-            port.postMessage({ type: 'chunk', text });
+            postPortMessage(port, { type: 'chunk', text });
           }
         } catch (err) {
           console.warn('[background] Error parsing residual SSE:', err);
@@ -648,12 +728,14 @@ async function handleAISuggestionStream({ provider, apiKey, model, systemPrompt,
       }
     }
 
-    port.postMessage({ type: 'done' });
+    postPortMessage(port, { type: 'done', truncated });
 
   } catch (err) {
-    console.error('[background] Error en stream:', err);
-    port.postMessage({ type: 'error', error: err.message });
+    if (signal?.aborted && !String(signal.reason?.message || '').includes('tardó más')) return;
+    const errorMessage = signal?.aborted
+      ? (signal.reason?.message || err.message)
+      : err.message;
+    console.error('[background] Error en stream:', errorMessage);
+    postPortMessage(port, { type: 'error', error: errorMessage });
   }
 }
-
-

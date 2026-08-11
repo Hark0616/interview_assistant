@@ -132,15 +132,18 @@
       state.isActive = !state.isActive;
       if (state.isActive) {
         const btn = document.getElementById('ia-activate-btn');
-        if (btn) { btn.textContent = 'Preparando...'; btn.disabled = true; }
+        modules.sessionLog.resetSessionLog();
+        modules.captionCapture.startCaptionObserver();
+        if (btn) { btn.textContent = 'Detener'; btn.disabled = false; btn.classList.add('active'); }
+        updateStatus('Capturando subtítulos. Preparando contexto...', 'active');
+
         (async () => {
-          modules.sessionLog.resetSessionLog();
           if (!state.condensedProfile) await modules.ai.generateCondensedProfile();
           if (!state.condensedCompany) await modules.ai.generateCondensedCompany();
-          modules.captionCapture.startCaptionObserver();
-          if (btn) { btn.textContent = 'Detener'; btn.disabled = false; btn.classList.add('active'); }
+          if (state.isActive) updateStatus('Activo y listo', 'active');
         })();
       } else {
+        modules.ai.cancelCurrentRequest();
         modules.captionCapture.stopCaptionObserver();
         clearTimeout(state.debounceTimer);
         const btn = document.getElementById('ia-activate-btn');

@@ -293,7 +293,7 @@
 
       modules.ui.renderTranscript();
 
-      if (!isMe && !state.isLoading && !state.manualModeActive) {
+      if (!isMe && !state.manualModeActive) {
         clearTimeout(state.debounceTimer);
         const debounceMs = state.config?.debounceMs ?? 1800;
         state.debounceTimer = setTimeout(() => {

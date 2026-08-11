@@ -407,7 +407,19 @@ document.addEventListener('DOMContentLoaded', () => {
         showResult('save-result', 'Configuración guardada', 'success');
         chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
           const tab = tabs[0];
-          if (tab?.url?.includes('meet.google.com')) {
+          let isSupportedMeetingTab = false;
+          try {
+            const host = new URL(tab?.url || '').hostname;
+            isSupportedMeetingTab = host === 'meet.google.com'
+              || host === 'teams.microsoft.com'
+              || host === 'teams.live.com'
+              || host === 'teams.cloud.microsoft'
+              || host.endsWith('.teams.microsoft.com')
+              || host.endsWith('.teams.cloud.microsoft');
+          } catch {
+            isSupportedMeetingTab = false;
+          }
+          if (tab?.id != null && isSupportedMeetingTab) {
             chrome.tabs.sendMessage(tab.id, { type: 'CONFIG_UPDATED' }).catch(() => {});
           }
         });

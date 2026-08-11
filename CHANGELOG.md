@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5.1
+
+- Cola de contexto para no perder preguntas que llegan durante una respuesta, con cancelación al detener y timeout de 30 segundos para el streaming.
+- La captura de subtítulos comienza inmediatamente al activar, continúa al cambiar de pestaña y la configuración guardada se refresca también en Teams.
+- Se retiró de la carga de producción la POC que descargaba automáticamente los mensajes propios del chat de Meet.
+
 ## 1.5.0
 
 - **Streaming de Sugerencias**: Se implementó una conexión persistente por puerto (`chrome.runtime.Port`) para transmitir la sugerencia en tiempo real token por token, reduciendo la latencia percibida a menos de 0.5 segundos.

@@ -18,7 +18,9 @@ describe('aiClient.js', () => {
         })
       },
       onDisconnect: {
-        addListener: vi.fn()
+        addListener: vi.fn((listener) => {
+          mockPort._disconnectListener = listener;
+        })
       },
       disconnect: vi.fn()
     };
@@ -38,7 +40,11 @@ describe('aiClient.js', () => {
       config: { myName: 'TestUser', apiKey: '123', provider: 'gemini' },
       captionBuffer: [],
       suggestionHistory: [],
-      isLoading: false
+      isLoading: false,
+      pendingAiRequest: false,
+      pendingAiTimer: null,
+      currentAiPort: null,
+      lastAiRequestCompletedAt: 0
     };
     C = {
       AI_CONTEXT_MAX_LINES: 10,
@@ -56,7 +62,8 @@ describe('aiClient.js', () => {
       ui: {
         updateStatus: vi.fn(),
         setLoadingState: vi.fn(),
-        displaySuggestion: vi.fn()
+        displaySuggestion: vi.fn(),
+        setUserNote: vi.fn()
       }
     };
 
@@ -95,5 +102,35 @@ describe('aiClient.js', () => {
 
     expect(modules.ui.displaySuggestion).toHaveBeenCalledWith('Estoy bien');
     expect(state.suggestionHistory[0].answer).toBe('Estoy bien');
+  });
+
+  it('debería poner en cola el contexto que llega durante una respuesta', async () => {
+    state.captionBuffer = [{ id: 1, role: 'interviewer', text: 'Primera pregunta' }];
+    await aiClient.requestSuggestion();
+
+    state.captionBuffer.push({ id: 2, role: 'interviewer', text: 'Segunda pregunta' });
+    await aiClient.requestSuggestion();
+    expect(state.pendingAiRequest).toBe(true);
+
+    global.mockPort._messageListener({ type: 'chunk', text: 'Primera respuesta' });
+    global.mockPort._messageListener({ type: 'done' });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    expect(chrome.runtime.connect).toHaveBeenCalledTimes(2);
+    expect(state.lastAiContextCaptionId).toBe(1);
+  });
+
+  it('debería cancelar el puerto y limpiar la cola', async () => {
+    state.captionBuffer = [{ id: 1, role: 'interviewer', text: 'Una pregunta' }];
+    await aiClient.requestSuggestion();
+    state.pendingAiRequest = true;
+
+    aiClient.cancelCurrentRequest();
+
+    expect(global.mockPort.postMessage).toHaveBeenCalledWith({ type: 'CANCEL_AI_SUGGESTION_STREAM' });
+    expect(global.mockPort.disconnect).toHaveBeenCalled();
+    expect(state.isLoading).toBe(false);
+    expect(state.pendingAiRequest).toBe(false);
+    expect(state.currentAiPort).toBeNull();
   });
 });

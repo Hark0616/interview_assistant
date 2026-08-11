@@ -237,7 +237,9 @@
     }
 
     function handleSuggestionSuccess(response, latestQuestion, recentLines) {
-      const lastCaption = state.captionBuffer[state.captionBuffer.length - 1];
+      // Marcar únicamente el contexto que realmente se envió. Pueden haber llegado
+      // subtítulos nuevos mientras el modelo estaba generando la respuesta.
+      const lastCaption = recentLines[recentLines.length - 1];
       if (lastCaption) state.lastAiContextCaptionId = lastCaption.id;
 
       const suggestionText = response.truncated
@@ -261,10 +263,53 @@
       modules.ui.displaySuggestion(suggestionText);
     }
 
+    function finishCurrentRequest(port) {
+      if (state.currentAiPort !== port) return false;
+      state.currentAiPort = null;
+      state.isLoading = false;
+      state.lastAiRequestCompletedAt = Date.now();
+      modules.ui.setLoadingState(false);
+      return true;
+    }
+
+    function schedulePendingRequest() {
+      if (!state.pendingAiRequest) return;
+      state.pendingAiRequest = false;
+      if (state.pendingAiTimer) clearTimeout(state.pendingAiTimer);
+
+      const elapsed = Date.now() - (state.lastAiRequestCompletedAt || 0);
+      const waitMs = Math.max(0, C.AI_REQUEST_COOLDOWN_MS - elapsed);
+      state.pendingAiTimer = setTimeout(() => {
+        state.pendingAiTimer = null;
+        requestSuggestion();
+      }, waitMs);
+    }
+
+    function cancelCurrentRequest() {
+      state.pendingAiRequest = false;
+      if (state.pendingAiTimer) clearTimeout(state.pendingAiTimer);
+      state.pendingAiTimer = null;
+
+      const port = state.currentAiPort;
+      state.currentAiPort = null;
+      state.isLoading = false;
+      modules.ui.setLoadingState(false);
+
+      if (!port) return;
+      try { port.postMessage({ type: 'CANCEL_AI_SUGGESTION_STREAM' }); } catch { /* puerto cerrado */ }
+      try { port.disconnect(); } catch { /* puerto cerrado */ }
+    }
+
     async function requestSuggestion() {
-      if (!state.config?.apiKey || state.isLoading) return;
+      if (!state.config?.apiKey) return;
+      if (state.isLoading) {
+        state.pendingAiRequest = true;
+        modules.ui.updateStatus('Llegó contexto nuevo; queda en cola', 'active');
+        return;
+      }
       if (Date.now() - state.lastAiRequestCompletedAt < C.AI_REQUEST_COOLDOWN_MS) {
-        modules.ui.updateStatus('Espera un momento...', 'idle');
+        state.pendingAiRequest = true;
+        schedulePendingRequest();
         return;
       }
 
@@ -278,6 +323,7 @@
       }
 
       state.isLoading = true;
+      state.pendingAiRequest = false;
       modules.ui.setLoadingState(true);
       modules.ui.displaySuggestion(''); // Limpiar sugerencia previa
 
@@ -292,6 +338,7 @@
 
       try {
         const port = chrome.runtime.connect({ name: 'ai-stream' });
+        state.currentAiPort = port;
         
         port.postMessage({
           type: 'GET_AI_SUGGESTION_STREAM',
@@ -313,41 +360,47 @@
             accumulatedSuggestion += msg.text;
             modules.ui.displaySuggestion(accumulatedSuggestion);
           } else if (msg.type === 'done') {
-            state.isLoading = false;
-            modules.ui.setLoadingState(false);
-            state.lastAiRequestCompletedAt = Date.now();
-            
-            handleSuggestionSuccess({ suggestion: accumulatedSuggestion, truncated: false }, latestQuestion, recentLines);
+            if (!finishCurrentRequest(port)) return;
+            if (accumulatedSuggestion) {
+              handleSuggestionSuccess(
+                { suggestion: accumulatedSuggestion, truncated: !!msg.truncated },
+                latestQuestion,
+                recentLines
+              );
+            } else {
+              modules.sessionLog.recordIaError('Respuesta vacía del modelo');
+              modules.ui.displaySuggestion('Error: respuesta vacía del modelo', true);
+            }
             port.disconnect();
+            schedulePendingRequest();
           } else if (msg.type === 'error') {
-            state.isLoading = false;
-            modules.ui.setLoadingState(false);
-            state.lastAiRequestCompletedAt = Date.now();
-            
+            if (!finishCurrentRequest(port)) return;
             modules.sessionLog.recordIaError(msg.error || 'desconocido');
             modules.ui.displaySuggestion(`Error en streaming: ${msg.error || 'desconocido'}`, true);
             port.disconnect();
+            schedulePendingRequest();
           }
         });
 
         port.onDisconnect.addListener(() => {
-          if (state.isLoading) {
-            state.isLoading = false;
-            modules.ui.setLoadingState(false);
-            if (accumulatedSuggestion) {
-              handleSuggestionSuccess({ suggestion: accumulatedSuggestion, truncated: false }, latestQuestion, recentLines);
-            } else {
-              modules.ui.displaySuggestion('Error: Conexión con el fondo perdida', true);
-            }
+          if (!finishCurrentRequest(port)) return;
+          if (accumulatedSuggestion) {
+            handleSuggestionSuccess({ suggestion: accumulatedSuggestion, truncated: false }, latestQuestion, recentLines);
+          } else {
+            modules.sessionLog.recordIaError('Conexión con el fondo perdida');
+            modules.ui.displaySuggestion('Error: Conexión con el fondo perdida', true);
           }
+          schedulePendingRequest();
         });
 
       } catch (err) {
+        state.currentAiPort = null;
         state.isLoading = false;
         modules.ui.setLoadingState(false);
         state.lastAiRequestCompletedAt = Date.now();
         modules.sessionLog.recordIaError(err.message);
         modules.ui.displaySuggestion(`Error de puerto: ${err.message}`, true);
+        schedulePendingRequest();
       }
     }
 
@@ -356,7 +409,8 @@
       generateCondensedProfile,
       generateCondensedCompany,
       buildSystemPrompt,
-      sendMessageAsync
+      sendMessageAsync,
+      cancelCurrentRequest
     };
   };
 })();

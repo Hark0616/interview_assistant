@@ -44,6 +44,9 @@
     sessionAiEvents: [],
     persistSessionTimer: null,
     lastAiRequestCompletedAt: 0,
+    pendingAiRequest: false,
+    pendingAiTimer: null,
+    currentAiPort: null,
     /** ID del caption más reciente del buffer la última vez que la IA generó una sugerencia */
     lastAiContextCaptionId: null,
     captionObserver: null,
@@ -72,8 +75,6 @@
   modules.captionCapture = window.__ia.createCaptionCapture(state, C, modules);
   modules.ai = window.__ia.createAiClient(state, C, modules);
   modules.ui = window.__ia.createOverlayUI(state, C, modules);
-  /** POC: registro de mensajes propios al chat de Meet (meetChatSelfLogPoc.js) */
-  modules.chatSelfLogPoc = window.__ia.createMeetChatSelfLogPoc(state, C, modules);
 
   // ══════════════════════════════════════
   //  CONFIGURACIÓN
@@ -119,7 +120,6 @@
       iaBootstrapped = true;
       if (waitForPlatform) clearInterval(waitForPlatform);
       waitForPlatform = null;
-      modules.chatSelfLogPoc.start();
       loadConfig((cfg) => {
         modules.ui.createOverlay();
         const statusIdle = isTeamsWebSurface() && !document.querySelector('[data-tid="hangup-button"]');
@@ -294,17 +294,11 @@
 
   function cleanup() {
     modules.captionCapture.stopCaptionObserver();
+    modules.ai.cancelCurrentRequest();
     clearTimeout(state.debounceTimer);
   }
 
   window.addEventListener('beforeunload', cleanup);
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden' && state.isActive) {
-      modules.captionCapture.stopCaptionObserver();
-    } else if (document.visibilityState === 'visible' && state.isActive) {
-      modules.captionCapture.startCaptionObserver();
-    }
-  });
 
   setTimeout(init, 2000);
 

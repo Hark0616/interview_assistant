@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Interview Assistant AI",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "Asistente de entrevistas en tiempo real para Google Meet y Microsoft Teams",
   "permissions": ["storage", "activeTab"],
   "host_permissions": [
@@ -34,7 +34,6 @@
         "sessionLog.js",
         "aiClient.js",
         "overlayUI.js",
-        "meetChatSelfLogPoc.js",
         "content.js"
       ],
       "css": ["shared.css", "content.css"],
