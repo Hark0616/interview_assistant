@@ -64,12 +64,47 @@
     ];
 
     function isSystemMessage(text) {
+      if (!text) return true;
+      if (text.length > 500) return true;
       const lower = text.toLowerCase().trim();
       if (SYSTEM_MESSAGE_EXACT.has(lower)) return true;
       for (const prefix of SYSTEM_MESSAGE_PREFIXES) {
         if (lower.startsWith(prefix)) return true;
       }
+      if (
+        lower.includes('videocamintegrated') ||
+        lower.includes('idioma de la reunión') ||
+        lower.includes('notificaciones de escritorio') ||
+        lower.includes('control de la llamada') ||
+        lower.includes('presionar para hablar')
+      ) return true;
       return false;
+    }
+
+    function mergeOverlapText(existing, incoming) {
+      existing = (existing || '').trim();
+      incoming = (incoming || '').trim();
+      if (!existing) return incoming;
+      if (!incoming) return existing;
+      if (existing === incoming) return existing;
+
+      if (existing.endsWith(incoming)) return existing;
+      if (incoming.startsWith(existing)) return incoming;
+      if (existing.includes(incoming)) return existing;
+
+      const wordsExist = existing.split(/\s+/);
+      const wordsInc = incoming.split(/\s+/);
+
+      const maxOverlap = Math.min(wordsExist.length, wordsInc.length);
+      for (let overlap = maxOverlap; overlap > 0; overlap--) {
+        const tail = wordsExist.slice(-overlap).join(' ');
+        const head = wordsInc.slice(0, overlap).join(' ');
+        if (tail.toLowerCase() === head.toLowerCase()) {
+          return wordsExist.slice(0, -overlap).join(' ') + ' ' + incoming;
+        }
+      }
+
+      return existing + ' ' + incoming;
     }
     function isTeamsHost() {
       const h = location.hostname;
@@ -282,10 +317,7 @@
         if (isSameBlock) {
           last.text = text; // El bloque creció (Meet)
         } else {
-          // Es un bloque nuevo de Teams del mismo orador, anexamos
-          if (!last.text.endsWith(text)) {
-            last.text = last.text.trim() + " " + text.trim();
-          }
+          last.text = mergeOverlapText(last.text, text);
         }
         last.timestamp = Date.now();
         modules.sessionLog.syncSessionTranscriptLast(speaker, role, last.text, last.id ?? null);

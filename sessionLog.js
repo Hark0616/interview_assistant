@@ -74,7 +74,8 @@
     }
 
     function pushSessionTranscriptLine(speaker, role, text, captionId) {
-      state.sessionTranscript.push({ t: Date.now(), speaker, role, text, captionId: captionId ?? null });
+      const cleanText = String(text || '').slice(0, 2000);
+      state.sessionTranscript.push({ t: Date.now(), speaker, role, text: cleanText, captionId: captionId ?? null });
       trimSessionTranscript();
       schedulePersistSessionLog();
       _modules.memoryLedger?.notifyTranscriptChanged?.();
@@ -82,15 +83,16 @@
 
     function syncSessionTranscriptLast(speaker, role, text, captionId) {
       const row = state.sessionTranscript[state.sessionTranscript.length - 1];
+      const cleanText = String(text || '').slice(0, 2000);
       if (row && row.speaker === speaker) {
-        row.text = text;
+        row.text = cleanText;
         row.t = Date.now();
         row.role = role;
         if (captionId != null) row.captionId = captionId;
         schedulePersistSessionLog();
         _modules.memoryLedger?.notifyTranscriptChanged?.();
       } else {
-        pushSessionTranscriptLine(speaker, role, text, captionId);
+        pushSessionTranscriptLine(speaker, role, cleanText, captionId);
       }
     }
 
