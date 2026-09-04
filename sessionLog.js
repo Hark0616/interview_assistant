@@ -73,26 +73,42 @@
       }
     }
 
-    function pushSessionTranscriptLine(speaker, role, text, captionId) {
+    function pushSessionTranscriptLine(speaker, role, text, captionId, revision = 1) {
       const cleanText = String(text || '').slice(0, 2000);
-      state.sessionTranscript.push({ t: Date.now(), speaker, role, text: cleanText, captionId: captionId ?? null });
+      state.sessionTranscript.push({
+        t: Date.now(), speaker, role, text: cleanText, captionId: captionId ?? null,
+        revision: Number.isInteger(Number(revision)) && Number(revision) > 0 ? Number(revision) : 1
+      });
       trimSessionTranscript();
       schedulePersistSessionLog();
       _modules.memoryLedger?.notifyTranscriptChanged?.();
     }
 
-    function syncSessionTranscriptLast(speaker, role, text, captionId) {
-      const row = state.sessionTranscript[state.sessionTranscript.length - 1];
+    function syncSessionTranscriptLast(speaker, role, text, captionId, revision = 1) {
       const cleanText = String(text || '').slice(0, 2000);
-      if (row && row.speaker === speaker) {
+      let row = null;
+      if (captionId != null) {
+        for (let i = state.sessionTranscript.length - 1; i >= 0; i--) {
+          if (state.sessionTranscript[i].captionId === captionId) {
+            row = state.sessionTranscript[i];
+            break;
+          }
+        }
+      } else {
+        row = state.sessionTranscript[state.sessionTranscript.length - 1];
+      }
+      if (row && (captionId != null ? row.captionId === captionId : row.speaker === speaker)) {
         row.text = cleanText;
         row.t = Date.now();
         row.role = role;
         if (captionId != null) row.captionId = captionId;
+        row.revision = Number.isInteger(Number(revision)) && Number(revision) > 0
+          ? Number(revision)
+          : (row.revision || 1);
         schedulePersistSessionLog();
         _modules.memoryLedger?.notifyTranscriptChanged?.();
       } else {
-        pushSessionTranscriptLine(speaker, role, cleanText, captionId);
+        pushSessionTranscriptLine(speaker, role, cleanText, captionId, revision);
       }
     }
 
@@ -105,6 +121,8 @@
       state.captionBuffer = [];
       state.lastUserSpokeId = null;
       state.lastAiContextCaptionId = null;
+      state.lastAiContextKey = '';
+      state.lastAutoContextKey = '';
       state.nextCaptionLineId = 1;
       if (state.persistSessionTimer) clearTimeout(state.persistSessionTimer);
       state.persistSessionTimer = null;
@@ -141,7 +159,10 @@
           id: row.captionId ?? idx + 1,
           speaker: row.speaker || '',
           text: row.text || '',
-          role: row.role === 'me' ? 'me' : 'interviewer',
+          role: row.role === 'me' ? 'me' : row.role === 'unknown' ? 'unknown' : 'interviewer',
+          revision: Number.isInteger(Number(row.revision)) && Number(row.revision) > 0
+            ? Number(row.revision)
+            : 1,
           timestamp: row.t || Date.now()
         }));
         const maxId = state.captionBuffer.reduce((m, row) => Math.max(m, Number(row.id) || 0), 0);
@@ -149,6 +170,8 @@
         const lastMe = [...state.captionBuffer].reverse().find((row) => row.role === 'me');
         state.lastUserSpokeId = lastMe?.id ?? null;
         state.lastAiContextCaptionId = null;
+        state.lastAiContextKey = '';
+        state.lastAutoContextKey = '';
 
         callback?.(true, {
           memory: String(data.memory || ''),
@@ -161,7 +184,11 @@
     function formatTranscriptLines(lines) {
       return lines
         .map((l) => {
-          const label = l.role === 'me' ? '[TÚ]' : '[ENTREVISTADOR]';
+          const label = l.role === 'me'
+            ? '[TÚ]'
+            : l.role === 'unknown'
+              ? '[ORADOR NO IDENTIFICADO]'
+              : '[ENTREVISTADOR]';
           const who = l.speaker ? `${l.speaker}` : '';
           return `${label}${who ? ' ' + who : ''}: ${l.text}`;
         })
@@ -259,10 +286,10 @@
     }
 
     function recordApiUsage(usage, purpose = 'suggestion') {
-      if (!usage || typeof usage !== 'object') return;
+      const normalizedUsage = usage && typeof usage === 'object' ? usage : {};
       const totals = ensureUsage();
       const add = (key) => {
-        const amount = Number(usage[key]);
+        const amount = Number(normalizedUsage[key]);
         if (Number.isFinite(amount) && amount >= 0) totals[key] += amount;
       };
       totals.requests += 1;
@@ -276,7 +303,7 @@
         t: Date.now(),
         kind: 'usage',
         purpose,
-        usage: { ...usage }
+        usage: { ...normalizedUsage }
       });
       if (state.sessionAiEvents.length > C.SESSION_AI_EVENTS_MAX) state.sessionAiEvents.shift();
       flushPersistSessionLog();
@@ -301,7 +328,11 @@
     }
 
     function formatSessionLogForDownload() {
-      const iso = (t) => new Date(t).toISOString();
+      const iso = (t) => {
+        const date = new Date(t);
+        return Number.isNaN(date.getTime()) ? '(sin fecha)' : date.toISOString();
+      };
+      const comparableText = (text) => String(text || '').replace(/\s+/g, ' ').trim();
       const lines = [
         '=== Interview Assistant — registro de reunión ===',
         `Sesión: ${state.meetingSessionId || '(sin id)'}`,
@@ -312,25 +343,72 @@
         `Tokens de razonamiento: ${ensureUsage().reasoningTokens}`,
         `Tokens cacheados: ${ensureUsage().cachedTokens}`,
         '',
-        '--- Transcripción (subtítulos capturados en esta activación) ---',
+        '--- Transcripción consolidada de la sesión (subtítulos capturados y restaurados) ---',
         ''
       ];
       for (const l of state.sessionTranscript) {
-        const role = l.role === 'me' ? 'TÚ' : 'ENTREVISTADOR';
-        lines.push(`[${iso(l.t)}] [${role}] ${l.speaker || '?'}: ${l.text}`);
+        const role = l.role === 'me'
+          ? 'TÚ'
+          : l.role === 'unknown'
+            ? 'ORADOR NO IDENTIFICADO'
+            : 'ENTREVISTADOR';
+        const revision = Number(l.revision);
+        const captionMeta = [];
+        if (l.captionId !== undefined && l.captionId !== null && l.captionId !== '') {
+          captionMeta.push(`captionId ${l.captionId}`);
+        }
+        if (Number.isInteger(revision) && revision >= 1) {
+          captionMeta.push(`rev ${revision}`);
+        }
+        const metadata = captionMeta.length ? ` [${captionMeta.join(' · ')}]` : '';
+        lines.push(`[${iso(l.t)}] [${role}] ${l.speaker || '?'}${metadata}: ${l.text}`);
       }
       const memorySnapshot = _modules.memoryLedger?.formatMarkdown?.();
       if (memorySnapshot) {
         lines.push('', '--- Memoria verificable de la entrevista ---', '', memorySnapshot.trim());
       }
-      lines.push('', '--- Eventos IA ---', '');
+      lines.push(
+        '',
+        '--- Eventos IA ---',
+        'Nota: los contextos enviados pueden repetir captions ya listados arriba. ' +
+          'Los contextos y respuestas idénticos se muestran completos una sola vez.',
+        ''
+      );
+      const seenActivationContexts = new Map();
+      const seenResponses = new Map();
+      let activationNumber = 0;
       for (const e of state.sessionAiEvents) {
         if (e.kind === 'activation') {
-          lines.push(`[${iso(e.t)}] *** IA ACTIVADA — contexto enviado ***`);
-          lines.push(e.text || '');
-          lines.push('');
+          activationNumber += 1;
+          const contextKey = comparableText(e.text);
+          const firstActivation = contextKey ? seenActivationContexts.get(contextKey) : null;
+          if (firstActivation) {
+            lines.push(
+              `[${iso(e.t)}] *** IA ACTIVADA — contexto repetido exactamente ` +
+                `(igual a solicitud #${firstActivation}; solicitud #${activationNumber}) ***`,
+              '(contenido del contexto omitido porque ya aparece arriba)',
+              ''
+            );
+          } else {
+            if (contextKey) seenActivationContexts.set(contextKey, activationNumber);
+            lines.push(`[${iso(e.t)}] *** IA ACTIVADA — contexto enviado (solicitud #${activationNumber}) ***`);
+            lines.push(e.text || '');
+            lines.push('');
+          }
         } else if (e.kind === 'response') {
-          lines.push(`[${iso(e.t)}] --- Sugerencia IA ---`);
+          const responseKey = comparableText(e.text);
+          const firstResponse = responseKey ? seenResponses.get(responseKey) : null;
+          if (firstResponse) {
+            lines.push(
+              `[${iso(e.t)}] --- Sugerencia IA repetida exactamente ` +
+                `(igual a solicitud #${firstResponse}) ---`,
+              '(contenido de la respuesta omitido porque ya aparece arriba)',
+              ''
+            );
+            continue;
+          }
+          if (responseKey) seenResponses.set(responseKey, activationNumber || 1);
+          lines.push(`[${iso(e.t)}] --- Sugerencia IA (solicitud #${activationNumber || 1}) ---`);
           lines.push(e.text || '');
           lines.push('');
         } else if (e.kind === 'usage') {
@@ -377,6 +455,7 @@
       recordApiUsage,
       formatUsageSummary,
       recordIaError,
+      formatSessionLogForDownload,
       downloadSessionLogFile
     };
   };

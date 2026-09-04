@@ -255,13 +255,13 @@
   background: var(--ia-surface-dim);
 }
 
-#ia-mode-row, #ia-debounce-row {
+#ia-language-row, #ia-mode-row, #ia-debounce-row {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-#ia-mode-toggle {
+#ia-mode-toggle, #ia-language-toggle {
   display: flex;
   margin-left: auto;
   background: rgba(0,0,0,0.3);

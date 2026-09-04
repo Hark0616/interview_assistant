@@ -6,7 +6,13 @@
 (function () {
   'use strict';
 
-  const { escapeHtml, FONT_LEVELS, renderCaptionLines, renderMemoryBullets } = window.__ia.utils;
+  const {
+    escapeHtml,
+    FONT_LEVELS,
+    renderCaptionLines,
+    renderMemoryBullets,
+    normalizeResponseLanguage
+  } = window.__ia.utils;
 
   // ── Refs a elementos DOM ──
 
@@ -24,6 +30,8 @@
     sendBtn:          document.getElementById('ia-panel-send-btn'),
     modeAuto:         document.getElementById('ia-panel-mode-auto'),
     modeManual:       document.getElementById('ia-panel-mode-manual'),
+    languageEs:       document.getElementById('ia-panel-language-es'),
+    languageEn:       document.getElementById('ia-panel-language-en'),
     debounceRow:      document.getElementById('ia-panel-debounce-row'),
     debounceSlider:   document.getElementById('ia-panel-debounce-slider'),
     debounceVal:      document.getElementById('ia-panel-debounce-val'),
@@ -99,6 +107,7 @@
     if (state.isActive != null) updateActivateBtn(state.isActive);
     if (state.manualMode != null) updateModeButtons(state.manualMode);
     if (state.debounceMs != null) updateDebounce(state.debounceMs);
+    if (state.responseLanguage != null) updateResponseLanguage(state.responseLanguage);
     if (state.userNote != null && document.activeElement !== el.userNote) {
       el.userNote.value = state.userNote;
     }
@@ -156,6 +165,14 @@
   function updateDebounce(ms) {
     el.debounceSlider.value = ms;
     el.debounceVal.textContent = (ms / 1000).toFixed(1) + 's';
+  }
+
+  function updateResponseLanguage(language) {
+    const normalized = normalizeResponseLanguage(language);
+    el.languageEs?.classList.toggle('active', normalized === 'es');
+    el.languageEn?.classList.toggle('active', normalized === 'en');
+    el.languageEs?.setAttribute('aria-pressed', normalized === 'es' ? 'true' : 'false');
+    el.languageEn?.setAttribute('aria-pressed', normalized === 'en' ? 'true' : 'false');
   }
 
   function updateMemory(memory) {
@@ -216,6 +233,8 @@
 
     el.modeAuto.addEventListener('click', () => sendCommand('setMode', { manual: false }));
     el.modeManual.addEventListener('click', () => sendCommand('setMode', { manual: true }));
+    el.languageEs?.addEventListener('click', () => sendCommand('setResponseLanguage', { language: 'es' }));
+    el.languageEn?.addEventListener('click', () => sendCommand('setResponseLanguage', { language: 'en' }));
 
     el.debounceSlider.addEventListener('input', () => {
       const ms = parseInt(el.debounceSlider.value);

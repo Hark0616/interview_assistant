@@ -207,6 +207,7 @@ body {
   flex-shrink: 0;
 }
 
+.ia-panel-language-row,
 .ia-panel-mode-row,
 .ia-panel-debounce-row {
   display: flex;

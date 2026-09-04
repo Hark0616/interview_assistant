@@ -72,6 +72,8 @@ describe('aiClient.js', () => {
       }
     };
 
+    const utilsCode = fs.readFileSync(path.resolve(__dirname, '../utils.js'), 'utf8');
+    eval(utilsCode);
     const code = fs.readFileSync(path.resolve(__dirname, '../aiClient.js'), 'utf8');
     eval(code);
     aiClient = window.__ia.createAiClient(state, C, modules);
@@ -84,10 +86,66 @@ describe('aiClient.js', () => {
     expect(prompt).toContain('TestUser');
   });
 
+  it('debería iniciar en español y no depender del idioma predominante', () => {
+    const prompt = aiClient.buildSystemPrompt();
+
+    expect(prompt.startsWith('IDIOMA OBLIGATORIO DE RESPUESTA')).toBe(true);
+    expect(prompt).toContain('Responde siempre en español');
+    expect(prompt).not.toContain('idioma predominante de la pregunta más reciente');
+  });
+
+  it('debería forzar inglés aunque el contexto esté en español', () => {
+    state.config.responseLanguage = 'en';
+    state.config.cvProfile = 'Experiencia profesional en español con proyectos de backend.';
+    state.config.jobDescription = 'Liderar un equipo de plataforma.';
+
+    const prompt = aiClient.buildSystemPrompt();
+
+    expect(prompt.startsWith('IDIOMA OBLIGATORIO DE RESPUESTA')).toBe(true);
+    expect(prompt).toContain('Responde siempre en inglés');
+    expect(prompt).not.toContain('Responde siempre en español');
+  });
+
+  it('debería mantener español aunque la pregunta esté en inglés', () => {
+    state.config.responseLanguage = 'es';
+    state.captionBuffer = [{
+      id: 1,
+      role: 'interviewer',
+      text: 'Tell me about a difficult technical decision you made.'
+    }];
+
+    const prompt = aiClient.buildSystemPrompt();
+
+    expect(prompt).toContain('Responde siempre en español');
+    expect(prompt).not.toContain('Responde siempre en inglés');
+  });
+
+  it('no debería aceptar idiomas no soportados ni activar un modo automático', () => {
+    state.config.responseLanguage = 'fr';
+
+    const prompt = aiClient.buildSystemPrompt();
+
+    expect(prompt).toContain('Responde siempre en español');
+    expect(prompt).not.toContain('francés');
+    expect(prompt).not.toContain('idioma predominante');
+  });
+
   it('no debería solicitar sugerencia si no hay API Key', async () => {
     state.config.apiKey = '';
     await aiClient.requestSuggestion();
     expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('conserva un speaker desconocido en el contexto sin presentarlo como entrevistador', async () => {
+    state.captionBuffer = [{
+      id: 1, role: 'unknown', text: 'Could you walk me through your approach?'
+    }];
+
+    await aiClient.requestSuggestion({ force: true });
+    const sent = global.mockPort.postMessage.mock.calls[0][0];
+
+    expect(sent.data.messages[0].content).toContain('[ORADOR NO IDENTIFICADO]');
+    expect(sent.data.messages[0].content).not.toContain('[ENTREVISTADOR]: Could you');
   });
 
   it('debería manejar una respuesta exitosa de la IA', async () => {
@@ -108,6 +166,50 @@ describe('aiClient.js', () => {
     expect(modules.ui.displaySuggestion).toHaveBeenCalledWith('Estoy bien');
     expect(state.suggestionHistory[0].answer).toBe('Estoy bien');
     expect(modules.memoryLedger.noteResponseCompleted).toHaveBeenCalledOnce();
+  });
+
+  it('no debería volver a enviar automáticamente el mismo contexto sin cambios', async () => {
+    state.captionBuffer = [{ id: 1, revision: 1, role: 'interviewer', text: '¿Cómo estás?' }];
+    await aiClient.requestSuggestion();
+    global.mockPort._messageListener({ type: 'chunk', text: 'Estoy bien' });
+    global.mockPort._messageListener({ type: 'done' });
+
+    await aiClient.requestSuggestion();
+
+    expect(chrome.runtime.connect).toHaveBeenCalledTimes(1);
+    expect(modules.ui.displaySuggestion).toHaveBeenCalledWith(
+      expect.stringContaining('No hay subtítulos nuevos'),
+      true
+    );
+  });
+
+  it('debería permitir Regenerar aunque no haya captions nuevos', async () => {
+    state.captionBuffer = [{ id: 1, revision: 1, role: 'interviewer', text: '¿Cómo estás?' }];
+    await aiClient.requestSuggestion();
+    global.mockPort._messageListener({ type: 'chunk', text: 'Primera respuesta' });
+    global.mockPort._messageListener({ type: 'done' });
+
+    await aiClient.requestSuggestion({ force: true });
+
+    expect(chrome.runtime.connect).toHaveBeenCalledTimes(2);
+    expect(global.mockPort.postMessage).toHaveBeenLastCalledWith(
+      expect.objectContaining({ type: 'GET_AI_SUGGESTION_STREAM' })
+    );
+  });
+
+  it('debería reenviar una revisión nueva del mismo caption aunque conserve su ID', async () => {
+    state.captionBuffer = [{ id: 1, revision: 1, role: 'interviewer', text: '¿Cómo trabajas con?' }];
+    await aiClient.requestSuggestion();
+    global.mockPort._messageListener({ type: 'chunk', text: 'Respuesta parcial' });
+    global.mockPort._messageListener({ type: 'done' });
+
+    state.captionBuffer[0].text = '¿Cómo trabajas con Kubernetes?';
+    state.captionBuffer[0].revision = 2;
+    await aiClient.requestSuggestion();
+
+    expect(chrome.runtime.connect).toHaveBeenCalledTimes(2);
+    expect(global.mockPort.postMessage.mock.calls.at(-1)[0].data.messages[0].content)
+      .toContain('¿Cómo trabajas con Kubernetes?');
   });
 
   it('debería poner en cola el contexto que llega durante una respuesta', async () => {

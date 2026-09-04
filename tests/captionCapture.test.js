@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { afterEach, describe, it, expect, beforeEach, vi } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 
@@ -29,7 +29,10 @@ describe('captionCapture.js - Microsoft Teams Logic', () => {
       sessionLog: {
         pushSessionTranscriptLine: vi.fn(),
         syncSessionTranscriptLast: vi.fn(),
-        findLastUserSpokeIndex: vi.fn(() => -1)
+        findLastUserSpokeIndex: vi.fn(() => {
+          if (state.lastUserSpokeId == null) return -1;
+          return state.captionBuffer.findIndex((line) => line.id === state.lastUserSpokeId);
+        })
       },
       ui: { updateStatus: vi.fn(), renderTranscript: vi.fn() },
       ai: { requestSuggestion: vi.fn() }
@@ -38,6 +41,11 @@ describe('captionCapture.js - Microsoft Teams Logic', () => {
     const code = fs.readFileSync(path.resolve(__dirname, '../captionCapture.js'), 'utf8');
     eval(code);
     captionCapture = window.__ia.createCaptionCapture(state, C, modules);
+  });
+
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
   });
 
   it('1. Debería extraer datos correctamente de un bloque de Teams', () => {
@@ -130,6 +138,67 @@ describe('captionCapture.js - Microsoft Teams Logic', () => {
     const thirdAttempt = simulateProcess();
     expect(thirdAttempt).toBe(true);
     expect(state.captionBuffer[0].text).toContain('Tengo una pregunta');
+    expect(state.captionBuffer[0].revision).toBe(2);
+    expect(modules.sessionLog.syncSessionTranscriptLast).toHaveBeenLastCalledWith(
+      'Ivan', 'interviewer', '¿Cómo va todo? Tengo una pregunta.', 1, 2
+    );
+  });
+
+  it('no debería fusionar bloques distintos si el speaker es desconocido', () => {
+    captionCapture.onNewCaption({
+      speaker: 'Desconocido', text: 'Primera frase suficientemente larga', block: document.createElement('div')
+    });
+    captionCapture.onNewCaption({
+      speaker: 'Desconocido', text: 'Segunda frase suficientemente larga', block: document.createElement('div')
+    });
+
+    expect(state.captionBuffer).toHaveLength(2);
+    expect(state.captionBuffer.map((line) => line.text)).toEqual([
+      'Primera frase suficientemente larga',
+      'Segunda frase suficientemente larga'
+    ]);
+  });
+
+  it('no debería sobrescribir un bloque reutilizado cuando cambia el speaker', () => {
+    const block = document.createElement('div');
+    captionCapture.onNewCaption({ speaker: 'Ivan', text: 'Pregunta del entrevistador', block });
+    captionCapture.onNewCaption({ speaker: 'Hark', text: 'Respuesta del candidato', block });
+
+    expect(state.captionBuffer).toHaveLength(2);
+    expect(state.captionBuffer[0]).toMatchObject({ speaker: 'Ivan', role: 'interviewer' });
+    expect(state.captionBuffer[1]).toMatchObject({ speaker: 'Hark', role: 'me' });
+  });
+
+  it('debería volver a disparar una pregunta idéntica después de una intervención del candidato', () => {
+    vi.useFakeTimers();
+    state.config.debounceMs = 0;
+    const question = '¿Cómo manejas una decisión técnica difícil en producción?';
+
+    captionCapture.onNewCaption({ speaker: 'Ivan', text: question, block: document.createElement('div') });
+    vi.runOnlyPendingTimers();
+    expect(modules.ai.requestSuggestion).toHaveBeenCalledTimes(1);
+
+    captionCapture.onNewCaption({ speaker: 'Hark', text: 'La abordo con datos y una prueba acotada.', block: document.createElement('div') });
+    captionCapture.onNewCaption({ speaker: 'Ivan', text: question, block: document.createElement('div') });
+    vi.runOnlyPendingTimers();
+
+    expect(modules.ai.requestSuggestion).toHaveBeenCalledTimes(2);
+  });
+
+  it('debería volver a disparar automáticamente cuando crece el mismo bloque', () => {
+    vi.useFakeTimers();
+    state.config.debounceMs = 0;
+    const block = document.createElement('div');
+
+    captionCapture.onNewCaption({ speaker: 'Ivan', text: '¿Cómo trabajas con Kubernetes?', block });
+    vi.runOnlyPendingTimers();
+    expect(modules.ai.requestSuggestion).toHaveBeenCalledTimes(1);
+
+    captionCapture.onNewCaption({ speaker: 'Ivan', text: '¿Cómo trabajas con Kubernetes en producción?', block });
+    vi.runOnlyPendingTimers();
+
+    expect(state.captionBuffer[0].revision).toBe(2);
+    expect(modules.ai.requestSuggestion).toHaveBeenCalledTimes(2);
   });
 
   it('5. Debería encolar contexto aunque la IA siga respondiendo', async () => {

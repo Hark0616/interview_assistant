@@ -48,9 +48,12 @@ Con OpenRouter también puedes elegir el routing: **Más rápido** para entrevis
 - **Pausa** (modo auto) — ajusta el tiempo de espera tras el último subtítulo antes de generar
 - **Copiar** — copia la sugerencia al portapapeles
 - **Regenerar** — pide una nueva sugerencia con el mismo contexto
+- **Exportar** — descarga un `.txt` con la transcripción consolidada de la sesión, roles, revisiones de captions, memoria verificable y eventos de IA; no exporta el chat nativo de Meet
 - **Minimizar / Cerrar** — controla la visibilidad del panel
 - **↗** — abre el asistente en **ventana aparte** (útil al compartir pantalla: si compartes solo la pestaña de Meet, la ventana del asistente no se ve)
 - El overlay es **arrastrable**
+
+Para una validación rápida antes de una reunión real, sigue [MANUAL_TEST_MEET.md](MANUAL_TEST_MEET.md), que incluye casos normales, captions parciales, speakers desconocidos, regeneración y pop-out.
 
 ### Atajos de teclado (pro)
 1. Abre `chrome://extensions/shortcuts` (o **Extensiones** → menú ⋮ → **Atajos de teclado**).

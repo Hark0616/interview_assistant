@@ -37,6 +37,7 @@
         meetingSessionId: state.meetingSessionId || '',
         bullets: [],
         processedCaptionId: null,
+        processedCaptionRevisions: {},
         pendingSince: null,
         questionsSinceUpdate: 0,
         updatedAt: Date.now()
@@ -62,11 +63,48 @@
       );
     }
 
+    function captionRevision(row) {
+      const revision = Number(row?.revision);
+      return Number.isInteger(revision) && revision > 0 ? revision : 1;
+    }
+
+    function processedRevision(ledger, captionId) {
+      const revisions = ledger.processedCaptionRevisions;
+      if (revisions && Object.prototype.hasOwnProperty.call(revisions, captionId)) {
+        const revision = Number(revisions[captionId]);
+        if (Number.isInteger(revision) && revision > 0) return revision;
+      }
+      // Ledgers anteriores a las revisiones solo conocían el cursor numérico;
+      // sus captions ya procesados equivalen a la primera revisión.
+      return Number(captionId) <= (Number(ledger.processedCaptionId) || 0) ? 1 : 0;
+    }
+
+    function markRowsProcessed(ledger, rows, lastCaptionId = null) {
+      if (!ledger.processedCaptionRevisions || typeof ledger.processedCaptionRevisions !== 'object') {
+        ledger.processedCaptionRevisions = {};
+      }
+      for (const row of rows || []) {
+        const captionId = Number(row.captionId);
+        if (!Number.isFinite(captionId)) continue;
+        ledger.processedCaptionRevisions[captionId] = captionRevision(row);
+      }
+      const rowMax = (rows || []).reduce(
+        (max, row) => Math.max(max, Number(row.captionId) || 0),
+        0
+      );
+      const requestedMax = Number(lastCaptionId) || 0;
+      ledger.processedCaptionId = Math.max(
+        Number(ledger.processedCaptionId) || 0,
+        rowMax,
+        requestedMax
+      );
+    }
+
     function skipPendingWhilePaused() {
       if (!state.meetingSessionId) return;
       const ledger = ensureLedger();
       const latest = latestCaptionId();
-      if (latest > (Number(ledger.processedCaptionId) || 0)) ledger.processedCaptionId = latest;
+      markRowsProcessed(ledger, state.sessionTranscript, latest);
       ledger.pendingSince = null;
       ledger.questionsSinceUpdate = 0;
       schedulePersist();
@@ -122,6 +160,12 @@
       ledger.processedCaptionId = Number.isFinite(Number(raw.processedCaptionId))
         ? Number(raw.processedCaptionId)
         : null;
+      ledger.processedCaptionRevisions = raw.processedCaptionRevisions &&
+        typeof raw.processedCaptionRevisions === 'object'
+        ? Object.fromEntries(Object.entries(raw.processedCaptionRevisions)
+          .map(([id, revision]) => [id, Number(revision)])
+          .filter(([id, revision]) => Number.isFinite(Number(id)) && Number.isInteger(revision) && revision > 0))
+        : {};
       ledger.pendingSince = Number.isFinite(Number(raw.pendingSince)) ? Number(raw.pendingSince) : null;
       ledger.questionsSinceUpdate = Math.max(0, Number(raw.questionsSinceUpdate) || 0);
       ledger.updatedAt = Number(raw.updatedAt) || Date.now();
@@ -254,7 +298,10 @@
       const ledger = ensureLedger();
       const processed = Number(ledger.processedCaptionId) || 0;
       const rows = state.sessionTranscript
-        .filter((row) => Number(row.captionId) > processed)
+        .filter((row) => {
+          const captionId = Number(row.captionId);
+          return captionId > processed || captionRevision(row) > processedRevision(ledger, captionId);
+        })
         .sort((a, b) => Number(a.captionId) - Number(b.captionId));
       const selected = [];
       let chars = 0;
@@ -384,7 +431,7 @@
       const existing = selectExistingForUpdate(rows);
       const captions = rows.map((row) => ({
         id: Number(row.captionId),
-        role: row.role === 'me' ? 'me' : 'interviewer',
+        role: row.role === 'me' ? 'me' : row.role === 'unknown' ? 'unknown' : 'interviewer',
         timestamp: Number(row.t) || Date.now(),
         speaker: String(row.speaker || ''),
         text: String(row.text || '')
@@ -424,7 +471,7 @@
       if (CANDIDATE_SOURCE_CATEGORIES.has(category) && !rows.some((row) => row.role === 'me')) {
         throw new Error(`La categoría ${category} requiere una fuente del candidato.`);
       }
-      if (INTERVIEWER_SOURCE_CATEGORIES.has(category) && !rows.some((row) => row.role !== 'me')) {
+      if (INTERVIEWER_SOURCE_CATEGORIES.has(category) && !rows.some((row) => row.role === 'interviewer')) {
         throw new Error(`La categoría ${category} requiere una fuente del entrevistador.`);
       }
       return ids;
@@ -552,7 +599,7 @@
           createdAt: now, updatedAt: now
         });
       }
-      ledger.processedCaptionId = lastCaptionId;
+      markRowsProcessed(ledger, rows, lastCaptionId);
       ledger.pendingSince = null;
       ledger.questionsSinceUpdate = 0;
       trimRecords();

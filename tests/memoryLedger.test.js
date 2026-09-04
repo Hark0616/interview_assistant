@@ -192,6 +192,43 @@ describe('memoryLedger.js', () => {
     expect(modules.sessionLog.recordApiUsage).toHaveBeenCalledWith(expect.anything(), 'memory-ledger');
   });
 
+  it('reprocesa una revisión nueva del mismo caption ya procesado', async () => {
+    await ledger.resetForSession();
+    state.sessionTranscript = [caption(1, 'me', 'Implementé OAuth')];
+    for (let i = 0; i < 5; i++) ledger.noteResponseCompleted();
+    sendMessageImpl = (_payload, callback) => callback({
+      success: true,
+      suggestion: JSON.stringify({ operations: [opAdd({ text: 'Implementé OAuth' })] })
+    });
+
+    expect(await ledger.requestUpdate()).toBe(true);
+    expect(state.memoryLedger.processedCaptionRevisions['1']).toBe(1);
+
+    const bulletId = ledger.getViewState().bullets[0].id;
+    state.sessionTranscript[0].text = 'Implementé OAuth con rotación de JWT';
+    state.sessionTranscript[0].revision = 2;
+    ledger.notifyTranscriptChanged();
+    for (let i = 0; i < 5; i++) ledger.noteResponseCompleted();
+
+    let updatePrompt = '';
+    sendMessageImpl = (payload, callback) => {
+      updatePrompt = payload.data.messages[0].content;
+      callback({
+        success: true,
+        suggestion: JSON.stringify({ operations: [
+          opAdd({
+            op: 'update', id: bulletId, text: 'Implementé OAuth con rotación de JWT', sourceCaptionIds: [1]
+          })
+        ] })
+      });
+    };
+
+    expect(await ledger.requestUpdate()).toBe(true);
+    expect(updatePrompt).toContain('Implementé OAuth con rotación de JWT');
+    expect(state.memoryLedger.processedCaptionRevisions['1']).toBe(2);
+    expect(ledger.getViewState().bullets[0].text).toBe('Implementé OAuth con rotación de JWT');
+  });
+
   it('usa el modelo de memoria configurado con su propia metadata', async () => {
     await ledger.resetForSession();
     state.config.memoryModel = 'fast/memory-model';

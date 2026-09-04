@@ -36,7 +36,12 @@ describe('UI de memoria', () => {
   it('sincroniza memoria del overlay al panel y permite editar/exportar', () => {
     global.chrome = {
       runtime: { sendMessage: vi.fn(() => Promise.resolve({ success: true })) },
-      storage: { local: { get: vi.fn(), set: vi.fn() } }
+      storage: {
+        local: {
+          get: vi.fn((keys, callback) => callback({ iaConfig: { apiKey: 'key' } })),
+          set: vi.fn()
+        }
+      }
     };
     loadScript('utils.js');
     loadScript('overlayUI.js');
@@ -70,6 +75,15 @@ describe('UI de memoria', () => {
       .find((message) => message.type === 'IA_PANEL_STATE');
     expect(panelState.data.memory.bullets[0].id).toBe('bullet-1');
     expect(document.getElementById('ia-memory-list').textContent).toContain('Experiencia con Node.js');
+    expect(document.getElementById('ia-language-es').classList.contains('active')).toBe(true);
+    expect(document.getElementById('ia-language-en').classList.contains('active')).toBe(false);
+
+    document.getElementById('ia-language-en').click();
+    expect(state.config.responseLanguage).toBe('en');
+    expect(document.getElementById('ia-language-en').classList.contains('active')).toBe(true);
+    expect(chrome.storage.local.set).toHaveBeenCalledWith({
+      iaConfig: { apiKey: 'key', responseLanguage: 'en' }
+    });
 
     vi.spyOn(window, 'prompt').mockReturnValue('Experiencia confirmada con Node.js');
     document.querySelector('#ia-memory-list [data-memory-action="edit"]').click();
@@ -108,10 +122,15 @@ describe('UI de memoria', () => {
       data: {
         statusState: 'active', statusText: 'Activo', usageText: '1 req',
         transcript: [], suggestion: { text: '' }, memory: memoryView,
-        isLoading: false, isActive: true, manualMode: false, debounceMs: 2800, userNote: ''
+        isLoading: false, isActive: true, manualMode: false, debounceMs: 2800,
+        responseLanguage: 'en', userNote: ''
       }
     });
     expect(document.getElementById('ia-panel-memory-list').textContent).toContain('Experiencia con Node.js');
+    expect(document.getElementById('ia-panel-language-en').classList.contains('active')).toBe(true);
+    expect(document.getElementById('ia-panel-language-es').classList.contains('active')).toBe(false);
+
+    document.getElementById('ia-panel-language-es').click();
 
     vi.spyOn(window, 'prompt').mockReturnValue('Editado desde panel');
     document.querySelector('#ia-panel-memory-list [data-memory-action="edit"]').click();
@@ -129,6 +148,9 @@ describe('UI de memoria', () => {
     });
     expect(commands).toContainEqual({
       type: 'IA_PANEL_COMMAND', command: 'setMemoryMode', data: { mode: 'existing' }
+    });
+    expect(commands).toContainEqual({
+      type: 'IA_PANEL_COMMAND', command: 'setResponseLanguage', data: { language: 'es' }
     });
   });
 });

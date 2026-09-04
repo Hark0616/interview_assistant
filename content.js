@@ -61,10 +61,13 @@
     persistSessionTimer: null,
     lastAiRequestCompletedAt: 0,
     pendingAiRequest: false,
+    pendingAiRequestForce: false,
     pendingAiTimer: null,
     currentAiPort: null,
     /** ID del caption más reciente del buffer la última vez que la IA generó una sugerencia */
     lastAiContextCaptionId: null,
+    lastAiContextKey: '',
+    lastAutoContextKey: '',
     captionObserver: null,
     captionPollInterval: null,
     captionProcessRAF: null,
@@ -100,7 +103,12 @@
   // ══════════════════════════════════════
   function loadConfig(callback) {
     chrome.storage.local.get(['iaConfig'], (result) => {
-      state.config = result.iaConfig || null;
+      state.config = result.iaConfig
+        ? {
+            ...result.iaConfig,
+            responseLanguage: window.__ia.utils.normalizeResponseLanguage(result.iaConfig.responseLanguage)
+          }
+        : null;
       callback(state.config);
     });
   }
@@ -208,6 +216,7 @@
         const oldJob = state.config?.jobDescription || '';
         const oldCompany = state.config?.company || '';
         loadConfig((newCfg) => {
+          modules.ui.syncResponseLanguage(newCfg?.responseLanguage);
           modules.memoryLedger.applyConfiguredMode();
           const cvChanged = (newCfg?.cvProfile || '') !== oldCv;
           const jobChanged = (newCfg?.jobDescription || '') !== oldJob;
@@ -295,7 +304,7 @@
         break;
       case 'requestSuggestion':
         state.lastSentText = '';
-        modules.ai.requestSuggestion();
+        modules.ai.requestSuggestion({ force: true });
         break;
       case 'setMode':
         modules.ui.setMode(!!data?.manual);
@@ -305,6 +314,9 @@
         break;
       case 'setNote':
         modules.ui.setUserNote(data?.text || '');
+        break;
+      case 'setResponseLanguage':
+        modules.ui.setResponseLanguage(data?.language);
         break;
       case 'downloadLog':
         modules.sessionLog.downloadSessionLogFile();

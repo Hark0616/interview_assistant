@@ -63,6 +63,32 @@ describe('background.js - OpenRouter', () => {
     expect(body.messages[0].content[0].cache_control).toEqual({ type: 'ephemeral', ttl: '1h' });
   });
 
+  it('construye el payload de Gemini con system instruction y roles compatibles', () => {
+    const body = helpers.PROVIDERS.gemini.buildBody(
+      'responde en español',
+      [{ role: 'user', content: 'pregunta' }, { role: 'assistant', content: 'respuesta previa' }],
+      'gemini-flash-latest',
+      { maxCompletionTokens: 256, temperature: 0.2 }
+    );
+
+    expect(body.systemInstruction.parts[0].text).toBe('responde en español');
+    expect(body.contents.map((item) => item.role)).toEqual(['user', 'model']);
+    expect(body.generationConfig).toEqual({ maxOutputTokens: 256, temperature: 0.2 });
+  });
+
+  it('construye el payload de Groq con autenticación y límite de salida', () => {
+    const headers = helpers.PROVIDERS.groq.buildHeaders('groq-key');
+    const body = helpers.PROVIDERS.groq.buildBody(
+      'system', [{ role: 'user', content: 'question' }], 'llama-3.3-70b-versatile',
+      { maxCompletionTokens: 128, temperature: 0.1 }
+    );
+
+    expect(headers.Authorization).toBe('Bearer groq-key');
+    expect(body.messages[0]).toEqual({ role: 'system', content: 'system' });
+    expect(body.max_tokens).toBe(128);
+    expect(body.temperature).toBe(0.1);
+  });
+
   it('respeta Retry-After expresado en segundos', () => {
     const response = { headers: { get: vi.fn(() => '12') } };
     expect(helpers.getRetryDelayMs(response, 500)).toBe(12000);

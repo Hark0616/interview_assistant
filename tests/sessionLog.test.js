@@ -70,6 +70,22 @@ describe('sessionLog.js', () => {
     expect(state.sessionTranscript).toHaveLength(1);
   });
 
+  it('actualiza por captionId y conserva la revisión sin tocar otra línea del mismo speaker', () => {
+    state.meetingSessionId = 'meet-existing';
+    sessionLog.pushSessionTranscriptLine('Ivan', 'interviewer', 'Pregunta parcial', 1, 1);
+    sessionLog.pushSessionTranscriptLine('Ivan', 'interviewer', 'Otra pregunta', 2, 1);
+
+    sessionLog.syncSessionTranscriptLast('Ivan', 'interviewer', 'Pregunta completa', 1, 2);
+
+    expect(state.sessionTranscript).toHaveLength(2);
+    expect(state.sessionTranscript[0]).toMatchObject({
+      captionId: 1, text: 'Pregunta completa', revision: 2
+    });
+    expect(state.sessionTranscript[1]).toMatchObject({
+      captionId: 2, text: 'Otra pregunta', revision: 1
+    });
+  });
+
   it('combina una ventana literal reciente con fragmentos relevantes sin sugerencias IA', () => {
     state.sessionTranscript = Array.from({ length: 10 }, (_, index) => ({
       t: Date.now(),
@@ -116,6 +132,49 @@ describe('sessionLog.js', () => {
     });
     expect(sessionLog.formatUsageSummary()).toContain('$0.0123');
     expect(modules.ui.updateUsage).toHaveBeenCalled();
+  });
+
+  it('cuenta respuestas exitosas aunque el proveedor no devuelva usage', () => {
+    sessionLog.recordApiUsage(null, 'suggestion');
+
+    expect(state.sessionUsage).toMatchObject({
+      requests: 1,
+      promptTokens: 0,
+      completionTokens: 0,
+      cost: 0
+    });
+    expect(state.sessionAiEvents.at(-1)).toMatchObject({
+      kind: 'usage', purpose: 'suggestion', usage: {}
+    });
+    expect(sessionLog.formatUsageSummary()).toContain('1 req');
+  });
+
+  it('exporta la transcripción consolidada con roles, revisiones, memoria y eventos IA', () => {
+    state.meetingSessionId = 'meet-session';
+    sessionLog.pushSessionTranscriptLine('Ivan', 'interviewer', 'Pregunta parcial', 11, 1);
+    sessionLog.syncSessionTranscriptLast('Ivan', 'interviewer', 'Pregunta completa', 11, 2);
+    sessionLog.pushSessionTranscriptLine('', 'unknown', 'No se pudo atribuir', 12, 1);
+    sessionLog.recordIaActivation('Prompt enviado');
+    sessionLog.recordIaResponse('Respuesta generada');
+    sessionLog.recordApiUsage(null, 'suggestion');
+    sessionLog.recordIaActivation('Prompt enviado');
+    sessionLog.recordIaResponse('Respuesta generada');
+    sessionLog.recordIaError('Error de prueba');
+    modules.memoryLedger.formatMarkdown.mockReturnValue('## Hechos\n- Experiencia en APIs');
+
+    const output = sessionLog.formatSessionLogForDownload();
+
+    expect(output).toContain('Transcripción consolidada de la sesión');
+    expect(output).toContain('[ENTREVISTADOR] Ivan [captionId 11 · rev 2]: Pregunta completa');
+    expect(output).not.toContain('Pregunta parcial');
+    expect(output).toContain('[ORADOR NO IDENTIFICADO] ? [captionId 12 · rev 1]: No se pudo atribuir');
+    expect(output).toContain('## Hechos');
+    expect(output.match(/Prompt enviado/g)).toHaveLength(1);
+    expect(output.match(/Respuesta generada/g)).toHaveLength(1);
+    expect(output).toContain('contexto repetido exactamente');
+    expect(output).toContain('Sugerencia IA repetida exactamente');
+    expect(output).toContain('USO suggestion: 0 in, 0 out, 0 cache, $0.000000');
+    expect(output).toContain('ERROR: Error de prueba');
   });
 
   it('restaura más de 800 líneas y entrega la memoria 1.6.0 para migración', async () => {

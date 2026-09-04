@@ -28,7 +28,7 @@ function readVault() {
     const raw = fs.readFileSync(FILE, 'utf8');
     const data = JSON.parse(raw);
     if (data && typeof data.apiKeys === 'object') return data;
-  } catch (_) {
+  } catch {
     /* archivo ausente o corrupto */
   }
   return { apiKeys: { gemini: '', groq: '', openrouter: '' } };
@@ -105,7 +105,7 @@ const server = http.createServer((req, res) => {
         };
         writeVault({ apiKeys });
         return send(res, 200, { ok: true, apiKeys });
-      } catch (e) {
+      } catch {
         return send(res, 400, { error: 'JSON inválido' });
       }
     });

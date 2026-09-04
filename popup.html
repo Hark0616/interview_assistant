@@ -121,6 +121,29 @@
 
     .model-row select { flex: 1; }
 
+    .language-toggle {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 5px;
+    }
+
+    .language-btn {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      color: #94a3b8;
+      border-radius: 7px;
+      padding: 7px 8px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .language-btn.active {
+      background: rgba(99,102,241,0.25);
+      border-color: rgba(99,102,241,0.65);
+      color: #c7d2fe;
+    }
+
     .model-filter-row {
       display: none;
       align-items: center;
@@ -252,6 +275,15 @@
   <!-- TAB: API -->
   <div class="tab-content active" id="tab-api">
     <div class="section-title">Configuración de API</div>
+
+    <div class="form-group">
+      <label>Idioma de respuesta</label>
+      <div class="language-toggle" role="group" aria-label="Idioma de respuesta">
+        <button type="button" class="language-btn active" id="response-language-es" aria-pressed="true">Español</button>
+        <button type="button" class="language-btn" id="response-language-en" aria-pressed="false">English</button>
+      </div>
+      <div class="hint">La IA respetará siempre esta selección. El cambio se guarda con «Guardar configuración».</div>
+    </div>
 
     <div class="form-group">
       <label>Proveedor de IA</label>

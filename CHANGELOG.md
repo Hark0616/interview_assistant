@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.7.3
+
+- La exportación evita repetir bloques idénticos de contexto y respuestas de IA, pero conserva el número de solicitud para detectar llamadas realmente repetidas.
+- El archivo diferencia la transcripción canónica de los contextos enviados al modelo para facilitar el diagnóstico de bucles.
+
+## 1.7.2
+
+- La captura de Meet procesa captions que ya estaban visibles al activar y conserva revisiones cuando cambia el texto o el speaker del mismo bloque DOM.
+- La identificación del candidato compara tokens y nombres normalizados, evitando falsos positivos por coincidencias parciales; speakers vacíos/desconocidos quedan sin atribución y no disparan auto-respuestas.
+- La exportación conserva la transcripción consolidada sin duplicar revisiones, identifica `captionId`/`revision`, distingue speakers desconocidos e incluye memoria y eventos IA.
+- El pop-out persiste su asociación con la pestaña de la reunión, recupera el estado tras reiniciar el service worker y rechaza controlar otra reunión abierta.
+- Las llamadas exitosas cuentan en el uso aunque el proveedor no devuelva métricas `usage`; se añadió una guía manual de validación para Meet/Teams.
+
 ## 1.7.1
 
 - La memoria puede cambiarse durante la entrevista entre desactivada, solo lectura y automática desde overlay, panel o popup.

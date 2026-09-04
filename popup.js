@@ -79,7 +79,26 @@ document.addEventListener('DOMContentLoaded', () => {
   const openrouterFreeOnly = document.getElementById('openrouter-free-only');
   const openrouterRoutingRow = document.getElementById('openrouter-routing-row');
   const openrouterReasoningRow = document.getElementById('openrouter-reasoning-row');
+  const responseLanguageEs = document.getElementById('response-language-es');
+  const responseLanguageEn = document.getElementById('response-language-en');
+  let responseLanguage = 'es';
   let savedConfig = {};
+
+  function normalizeResponseLanguage(value) {
+    return window.__ia.utils.normalizeResponseLanguage(value);
+  }
+
+  function updateResponseLanguageButtons(value) {
+    responseLanguage = normalizeResponseLanguage(value);
+    responseLanguageEs?.classList.toggle('active', responseLanguage === 'es');
+    responseLanguageEn?.classList.toggle('active', responseLanguage === 'en');
+    responseLanguageEs?.setAttribute('aria-pressed', responseLanguage === 'es' ? 'true' : 'false');
+    responseLanguageEn?.setAttribute('aria-pressed', responseLanguage === 'en' ? 'true' : 'false');
+  }
+
+  responseLanguageEs?.addEventListener('click', () => updateResponseLanguageButtons('es'));
+  responseLanguageEn?.addEventListener('click', () => updateResponseLanguageButtons('en'));
+  updateResponseLanguageButtons('es');
 
   function openRouterOnlyFree() {
     return openrouterFreeOnly ? openrouterFreeOnly.checked !== false : true;
@@ -272,10 +291,12 @@ document.addEventListener('DOMContentLoaded', () => {
   chrome.storage.local.get(['iaConfig'], (result) => {
     const cfg = result.iaConfig;
     if (!cfg) {
+      updateResponseLanguageButtons('es');
       updateModels('gemini');
       return;
     }
     savedConfig = cfg;
+    updateResponseLanguageButtons(cfg.responseLanguage);
 
     const savedKeys = cfg.apiKeys || {};
     apiKeys.gemini = savedKeys.gemini || '';
@@ -465,6 +486,7 @@ document.addEventListener('DOMContentLoaded', () => {
         memoryModel,
         memoryModelMetadata,
         memoryMode: getValue('memoryMode') || 'automatic',
+        responseLanguage,
         myName: getValue('myName'),
         cvProfile: getValue('cvProfile'),
         jobDescription: getValue('jobDescription'),

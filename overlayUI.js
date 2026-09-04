@@ -8,7 +8,14 @@
   window.__ia = window.__ia || {};
 
   window.__ia.createOverlayUI = function (state, C, modules) {
-    const { escapeHtml, FONT_LEVELS, renderCaptionLines, renderMemoryBullets } = window.__ia.utils;
+    const {
+      escapeHtml,
+      FONT_LEVELS,
+      renderCaptionLines,
+      renderMemoryBullets,
+      normalizeResponseLanguage,
+      responseLanguageLabel
+    } = window.__ia.utils;
 
     let transcriptScrollProgrammatic = false;
     let panelUpdateTimer = null;
@@ -42,6 +49,7 @@
           memory: modules.memoryLedger.getViewState(),
           myName: state.config?.myName || '',
           hasConfig: !!state.config?.apiKey,
+          responseLanguage: normalizeResponseLanguage(state.config?.responseLanguage),
           ...partial,
         };
         chrome.runtime.sendMessage({ type: 'IA_PANEL_STATE', data }).catch(() => {});
@@ -212,6 +220,29 @@
       });
     }
 
+    function syncResponseLanguage(language) {
+      const normalized = normalizeResponseLanguage(language);
+      const spanishBtn = document.getElementById('ia-language-es');
+      const englishBtn = document.getElementById('ia-language-en');
+      spanishBtn?.classList.toggle('active', normalized === 'es');
+      englishBtn?.classList.toggle('active', normalized === 'en');
+      spanishBtn?.setAttribute('aria-pressed', normalized === 'es' ? 'true' : 'false');
+      englishBtn?.setAttribute('aria-pressed', normalized === 'en' ? 'true' : 'false');
+      sendPanelUpdate({ responseLanguage: normalized });
+      return normalized;
+    }
+
+    function setResponseLanguage(language) {
+      const normalized = normalizeResponseLanguage(language);
+      state.config = { ...(state.config || {}), responseLanguage: normalized };
+      syncResponseLanguage(normalized);
+      chrome.storage.local.get(['iaConfig'], (result) => {
+        const updated = { ...(result.iaConfig || {}), responseLanguage: normalized };
+        chrome.storage.local.set({ iaConfig: updated });
+      });
+      updateStatus(`Responderá en ${responseLanguageLabel(normalized)}`, state.isActive ? 'active' : 'idle');
+    }
+
     function setUserNote(text) {
       state.userNote = text;
       const noteEl = document.getElementById('ia-user-note');
@@ -323,12 +354,12 @@
 
       document.getElementById('ia-refresh-btn').onclick = () => {
         state.lastSentText = '';
-        modules.ai.requestSuggestion();
+        modules.ai.requestSuggestion({ force: true });
       };
 
       document.getElementById('ia-send-btn').onclick = () => {
         state.lastSentText = '';
-        modules.ai.requestSuggestion();
+        modules.ai.requestSuggestion({ force: true });
         document.getElementById('ia-send-btn').classList.remove('ia-send-pulse');
       };
     }
@@ -351,6 +382,12 @@
       slider.oninput = () => setDebounce(parseInt(slider.value));
 
       if (state.config?.manualMode) btnManual.click();
+
+      const spanishBtn = document.getElementById('ia-language-es');
+      const englishBtn = document.getElementById('ia-language-en');
+      spanishBtn?.addEventListener('click', () => setResponseLanguage('es'));
+      englishBtn?.addEventListener('click', () => setResponseLanguage('en'));
+      syncResponseLanguage(state.config?.responseLanguage);
     }
 
     function setupNoteEvents() {
@@ -551,6 +588,13 @@
         </div>
 
         <div id="ia-controls">
+          <div id="ia-language-row">
+            <span class="ia-control-label">Responder en:</span>
+            <div id="ia-language-toggle" class="ia-mode-toggle" role="group" aria-label="Idioma de respuesta">
+              <button id="ia-language-es" class="ia-mode-btn active" type="button" aria-pressed="true">Español</button>
+              <button id="ia-language-en" class="ia-mode-btn" type="button" aria-pressed="false">English</button>
+            </div>
+          </div>
           <div id="ia-mode-row">
             <span class="ia-control-label">Modo:</span>
             <div id="ia-mode-toggle">
@@ -559,7 +603,7 @@
             </div>
           </div>
           <div id="ia-debounce-row">
-            <span class="ia-control-label">Espera: <span id="ia-debounce-val">1.8s</span></span>
+            <span class="ia-control-label">Espera: <span id="ia-debounce-val">2.8s</span></span>
             <input type="range" id="ia-debounce-slider" min="500" max="5000" step="100" value="2800">
           </div>
         </div>
@@ -612,6 +656,8 @@
       toggleActivate,
       setMode,
       setDebounce,
+      setResponseLanguage,
+      syncResponseLanguage,
       setUserNote,
       showOverlay,
       hideOverlay,

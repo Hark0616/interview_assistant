@@ -19,6 +19,18 @@ describe('utils.js', () => {
       .toBe('&lt;script&gt;alert(&quot;hi&quot;)&amp;&lt;/script&gt;');
   });
 
+  it('debería usar español por defecto y rechazar valores de idioma no soportados', () => {
+    const { normalizeResponseLanguage, responseLanguageLabel } = window.__ia.utils;
+
+    expect(normalizeResponseLanguage()).toBe('es');
+    expect(normalizeResponseLanguage(null)).toBe('es');
+    expect(normalizeResponseLanguage('fr')).toBe('es');
+    expect(normalizeResponseLanguage('EN')).toBe('es');
+    expect(normalizeResponseLanguage('en')).toBe('en');
+    expect(responseLanguageLabel('en')).toBe('English');
+    expect(responseLanguageLabel('fr')).toBe('Español');
+  });
+
   it('debería renderizar líneas de subtítulos correctamente', () => {
     const { renderCaptionLines } = window.__ia.utils;
     const lines = [

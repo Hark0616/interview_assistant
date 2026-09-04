@@ -25,17 +25,36 @@
       return start > 0 ? out.slice(start) : out;
     }
 
-    function getContextLinesForAI() {
+    function buildAiContextKey(lines) {
+      return lines.map((caption) => {
+        const revision = Number.isInteger(Number(caption.revision)) && Number(caption.revision) > 0
+          ? Number(caption.revision)
+          : 1;
+        const text = String(caption.text || '')
+          .toLocaleLowerCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/[^a-z0-9]+/g, ' ')
+          .trim();
+        return `${caption.id}:${revision}:${caption.role || ''}:${text}`;
+      }).join('|');
+    }
+
+    function getContextLinesForAI(force = false) {
       const lastUserSpokeIdx = modules.sessionLog.findLastUserSpokeIndex();
       const start = lastUserSpokeIdx + 1;
+      const candidateLines = start >= state.captionBuffer.length
+        ? state.captionBuffer.slice()
+        : state.captionBuffer.slice(start);
+      if (candidateLines.length === 0) return [];
+
+      if (!force && state.lastAiContextKey && buildAiContextKey(candidateLines) === state.lastAiContextKey) {
+        return [];
+      }
+
       if (start >= state.captionBuffer.length) {
-        if (state.captionBuffer.length === 0) return [];
-        // Nada nuevo después de que el usuario habló.
-        // Solo devolver el buffer completo si la IA aún no ha respondido a este contexto.
-        const lastCaptionId = state.captionBuffer[state.captionBuffer.length - 1]?.id;
-        if (state.lastAiContextCaptionId != null && state.lastAiContextCaptionId >= lastCaptionId) {
-          return [];
-        }
+        // No hay líneas posteriores a la última intervención del usuario:
+        // para una primera petición manual se conserva el buffer completo.
         return trimContextLines(state.captionBuffer.slice());
       }
       return trimContextLines(state.captionBuffer.slice(start));
@@ -69,8 +88,14 @@
       const myName = state.config?.myName || 'el candidato';
       const profile = state.condensedProfile || state.config?.cvProfile || '';
       const company = state.condensedCompany || state.config?.company || '';
+      const responseLanguage = window.__ia.utils.normalizeResponseLanguage(
+        state.config?.responseLanguage
+      );
+      const languageInstruction = responseLanguage === 'en'
+        ? 'IDIOMA OBLIGATORIO DE RESPUESTA (SELECCIÓN DEL USUARIO): inglés. Responde siempre en inglés, aunque la pregunta, transcripción, perfil, puesto, empresa o nota estén en otro idioma. No detectes ni cambies el idioma.'
+        : 'IDIOMA OBLIGATORIO DE RESPUESTA (SELECCIÓN DEL USUARIO): español. Responde siempre en español, aunque la pregunta, transcripción, perfil, puesto, empresa o nota estén en otro idioma. No detectes ni cambies el idioma.';
 
-      const sections = [`Eres un asistente INVISIBLE de entrevistas en tiempo real para ${myName}.`];
+      const sections = [languageInstruction, `Eres un asistente INVISIBLE de entrevistas en tiempo real para ${myName}.`];
 
       if (profile) sections.push(`PERFIL:\n${profile}`);
       if (state.config?.jobDescription) sections.push(`PUESTO:\n${state.config.jobDescription}`);
@@ -121,7 +146,7 @@
 
 - No hagas preguntas de vuelta. Si la pregunta está incompleta, declara brevemente una suposición razonable y responde sin inventar hechos personales.
 
-- Responde en el idioma predominante de la pregunta más reciente. Conserva los nombres técnicos en inglés cuando sea natural.
+- Respeta siempre el idioma obligatorio seleccionado arriba. Conserva los nombres técnicos en inglés cuando sea natural, pero no cambies el idioma de la respuesta.
 
 - El usuario puede enviar un bloque largo: todo lo dicho desde su última intervención; usa el hilo completo como contexto.
 - Si aparece <<< RESPONDE A ESTO, prioriza eso (última intervención del entrevistador en el bloque); si no hay marca, infiere la pregunta principal del texto.
@@ -221,7 +246,11 @@
 
       const conversationText = preamble + recentLines
         .map((c, i) => {
-          const label = c.role === 'me' ? '[TÚ]' : '[ENTREVISTADOR]';
+          const label = c.role === 'me'
+            ? '[TÚ]'
+            : c.role === 'unknown'
+              ? '[ORADOR NO IDENTIFICADO]'
+              : '[ENTREVISTADOR]';
           const marker = i === lastIntIdx ? ' <<< RESPONDE A ESTO' : '';
           return `${label}: ${c.text}${marker}`;
         })
@@ -251,6 +280,7 @@
       // subtítulos nuevos mientras el modelo estaba generando la respuesta.
       const lastCaption = recentLines[recentLines.length - 1];
       if (lastCaption) state.lastAiContextCaptionId = lastCaption.id;
+      state.lastAiContextKey = buildAiContextKey(recentLines);
 
       const suggestionText = response.truncated
         ? response.suggestion + '\n⚠️ (respuesta cortada por límite de tokens — pulsa Regenerar)'
@@ -286,19 +316,22 @@
 
     function schedulePendingRequest() {
       if (!state.pendingAiRequest) return;
+      const force = state.pendingAiRequestForce === true;
       state.pendingAiRequest = false;
+      state.pendingAiRequestForce = false;
       if (state.pendingAiTimer) clearTimeout(state.pendingAiTimer);
 
       const elapsed = Date.now() - (state.lastAiRequestCompletedAt || 0);
       const waitMs = Math.max(0, C.AI_REQUEST_COOLDOWN_MS - elapsed);
       state.pendingAiTimer = setTimeout(() => {
         state.pendingAiTimer = null;
-        requestSuggestion();
+        requestSuggestion({ force });
       }, waitMs);
     }
 
     function cancelCurrentRequest() {
       state.pendingAiRequest = false;
+      state.pendingAiRequestForce = false;
       if (state.pendingAiTimer) clearTimeout(state.pendingAiTimer);
       state.pendingAiTimer = null;
 
@@ -312,15 +345,18 @@
       try { port.disconnect(); } catch { /* puerto cerrado */ }
     }
 
-    async function requestSuggestion() {
+    async function requestSuggestion(options = {}) {
+      const force = options?.force === true;
       if (!state.config?.apiKey) return;
       if (state.isLoading) {
         state.pendingAiRequest = true;
+        state.pendingAiRequestForce = state.pendingAiRequestForce === true || force;
         modules.ui.updateStatus('Llegó contexto nuevo; queda en cola', 'active');
         return;
       }
       if (Date.now() - state.lastAiRequestCompletedAt < C.AI_REQUEST_COOLDOWN_MS) {
         state.pendingAiRequest = true;
+        state.pendingAiRequestForce = state.pendingAiRequestForce === true || force;
         schedulePendingRequest();
         return;
       }
@@ -328,7 +364,7 @@
       // La generación principal siempre tiene prioridad sobre el proceso de memoria.
       modules.memoryLedger.cancelUpdate('Nueva sugerencia principal.');
 
-      const recentLines = getContextLinesForAI();
+      const recentLines = getContextLinesForAI(force);
       if (recentLines.length === 0) {
         const msg = state.captionBuffer.length > 0
           ? 'No hay subtítulos nuevos desde la última sugerencia. Espera a que hablen y vuelve a pulsar «Enviar ahora».'

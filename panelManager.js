@@ -6,29 +6,123 @@
 (function () {
   'use strict';
 
+  const PANEL_STATE_STORAGE_KEY = 'iaPanelAssociation';
   let panelState = { windowId: null, meetTabId: null };
+  let panelStateReady = false;
+  let panelOpenInFlight = null;
 
-  chrome.windows.onRemoved.addListener((windowId) => {
-    if (windowId === panelState.windowId) {
-      const tabId = panelState.meetTabId;
-      panelState = { windowId: null, meetTabId: null };
-      if (tabId) {
-        chrome.tabs.sendMessage(tabId, { type: 'IA_PANEL_CLOSED' }).catch(() => {});
+  function getPanelStorage() {
+    return chrome.storage?.session || chrome.storage?.local || null;
+  }
+
+  function persistPanelState() {
+    const storage = getPanelStorage();
+    if (!storage?.set) return Promise.resolve();
+    return new Promise((resolve) => {
+      try {
+        storage.set({ [PANEL_STATE_STORAGE_KEY]: panelState }, () => resolve());
+      } catch {
+        resolve();
       }
+    });
+  }
+
+  const panelStateReadyPromise = new Promise((resolve) => {
+    const storage = getPanelStorage();
+    if (!storage?.get) {
+      panelStateReady = true;
+      resolve();
+      return;
+    }
+
+    try {
+      storage.get([PANEL_STATE_STORAGE_KEY], (result) => {
+        const stored = result?.[PANEL_STATE_STORAGE_KEY];
+        if (Number.isInteger(stored?.windowId) && Number.isInteger(stored?.meetTabId)) {
+          panelState = { windowId: stored.windowId, meetTabId: stored.meetTabId };
+        }
+        panelStateReady = true;
+        resolve();
+      });
+    } catch {
+      panelStateReady = true;
+      resolve();
     }
   });
 
-  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request.type === 'IA_OPEN_PANEL') {
-      const meetTabId = sender.tab?.id;
-      if (!meetTabId) { sendResponse({ success: false }); return; }
+  function ensurePanelStateReady() {
+    return panelStateReady ? Promise.resolve() : panelStateReadyPromise;
+  }
 
-      if (panelState.windowId) {
-        chrome.windows.update(panelState.windowId, { focused: true }).catch(() => {});
-        sendResponse({ success: true, alreadyOpen: true });
+  function clearPanelState() {
+    panelState = { windowId: null, meetTabId: null };
+    return persistPanelState();
+  }
+
+  function sendTabMessage(tabId, message) {
+    if (tabId == null) return;
+    try {
+      const result = chrome.tabs.sendMessage(tabId, message);
+      result?.catch?.(() => {});
+    } catch {
+      // La pestaña puede haberse cerrado entre la lectura y el relay.
+    }
+  }
+
+  function getWindowExists(windowId) {
+    if (windowId == null || !chrome.windows?.get) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      try {
+        chrome.windows.get(windowId, (win) => {
+          resolve(!chrome.runtime?.lastError && !!win?.id);
+        });
+      } catch {
+        resolve(false);
+      }
+    });
+  }
+
+  chrome.windows.onRemoved.addListener((windowId) => {
+    void ensurePanelStateReady().then(async () => {
+      if (windowId !== panelState.windowId) return;
+      const tabId = panelState.meetTabId;
+      await clearPanelState();
+      sendTabMessage(tabId, { type: 'IA_PANEL_CLOSED' });
+    });
+  });
+
+  async function openPanelInternal(sender, sendResponse) {
+    const meetTabId = sender.tab?.id;
+    if (meetTabId == null) {
+      sendResponse({ success: false, error: 'No se encontró la pestaña de la reunión.' });
+      return;
+    }
+
+    await ensurePanelStateReady();
+
+    if (panelState.windowId != null) {
+      if (!await getWindowExists(panelState.windowId)) {
+        await clearPanelState();
+      } else if (panelState.meetTabId !== meetTabId) {
+        sendResponse({
+          success: false,
+          alreadyOpen: true,
+          error: 'Ya existe un panel asociado a otra pestaña de reunión.'
+        });
+        return;
+      } else {
+        try {
+          await chrome.windows.update(panelState.windowId, { focused: true });
+          sendResponse({ success: true, alreadyOpen: true });
+        } catch (err) {
+          await clearPanelState();
+          sendResponse({ success: false, error: err?.message || 'No se pudo enfocar el panel.' });
+        }
         return;
       }
+    }
 
+    try {
       chrome.windows.create({
         url: 'panel.html',
         type: 'popup',
@@ -36,25 +130,54 @@
         height: 680,
         left: 40,
         top: 60,
-      }, (win) => {
-        panelState.windowId = win.id;
-        panelState.meetTabId = meetTabId;
+      }, async (win) => {
+        const lastError = chrome.runtime?.lastError;
+        if (lastError || !win?.id) {
+          sendResponse({ success: false, error: lastError?.message || 'No se pudo crear el panel.' });
+          return;
+        }
+        panelState = { windowId: win.id, meetTabId };
+        await persistPanelState();
         sendResponse({ success: true });
       });
+    } catch (err) {
+      sendResponse({ success: false, error: err?.message || 'No se pudo crear el panel.' });
+    }
+  }
+
+  function openPanel(sender, sendResponse) {
+    const previous = panelOpenInFlight || Promise.resolve();
+    const current = previous.then(async () => {
+      try {
+        await openPanelInternal(sender, sendResponse);
+      } catch (err) {
+        sendResponse({ success: false, error: err?.message || 'No se pudo abrir el panel.' });
+      }
+    });
+    panelOpenInFlight = current;
+    void current.finally(() => {
+      if (panelOpenInFlight === current) panelOpenInFlight = null;
+    });
+    return current;
+  }
+
+  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.type === 'IA_OPEN_PANEL') {
+      void openPanel(sender, sendResponse);
       return true;
     }
 
     if (request.type === 'IA_PANEL_READY') {
-      if (panelState.meetTabId) {
-        chrome.tabs.sendMessage(panelState.meetTabId, { type: 'IA_PANEL_READY' }).catch(() => {});
-      }
+      void ensurePanelStateReady().then(() => {
+        sendTabMessage(panelState.meetTabId, { type: 'IA_PANEL_READY' });
+      });
       return;
     }
 
     if (request.type === 'IA_PANEL_COMMAND') {
-      if (panelState.meetTabId) {
-        chrome.tabs.sendMessage(panelState.meetTabId, request).catch(() => {});
-      }
+      void ensurePanelStateReady().then(() => {
+        sendTabMessage(panelState.meetTabId, request);
+      });
       return;
     }
 

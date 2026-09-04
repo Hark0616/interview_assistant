@@ -6,6 +6,16 @@
   window.__ia = window.__ia || {};
 
   window.__ia.utils = {
+    RESPONSE_LANGUAGE_DEFAULT: 'es',
+
+    normalizeResponseLanguage(value) {
+      return value === 'en' ? 'en' : 'es';
+    },
+
+    responseLanguageLabel(value) {
+      return value === 'en' ? 'English' : 'Español';
+    },
+
     escapeHtml(text) {
       return String(text)
         .replace(/&/g, '&amp;')
